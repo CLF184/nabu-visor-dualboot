@@ -4,7 +4,7 @@
 
 ## 菜单与固件
 
-Visor 编译为 AArch64 DXE 驱动 `NabuBootMenu.efi`，插入基础 FD，挂接原 BDS 入口并在其前显示菜单。配置、图标、背景继续从 ESP 的 `\EFI\visor\` 加载。基础 FD 的其他可执行模块保留原字节。
+Visor 编译为 AArch64 DXE 驱动 `NabuBootMenu.efi`，插入基础 FD，挂接原 BDS 入口并在其前显示菜单。配置统一从 ESP 的 `\EFI\visor\boot.conf` 读取，使用上游 `CONFIG_FILE` 常量；图标、背景继续从 ESP 的 `\EFI\visor\` 加载。基础 FD 的其他可执行模块保留原字节。
 
 横屏、音量键轮流选择系统和电源动作、电源松开确认是 nabu 适配。初始 5 秒无输入自动 Android，输入后取消本次倒计时。构建按上游完整功能清单处理，只遵循其 ARM64 架构限制。
 

@@ -152,7 +152,7 @@ py update_visor.py
 
 ## 修改背景、标题与配置
 
-运行时配置文件在平板 ESP 的 **`\EFI\visor\boot.conf`**。修改后下次进入菜单生效，无需重刷 boot。
+运行时统一读取平板 ESP 的 **`\EFI\visor\boot.conf`**，沿用 Visor 上游的配置路径。修改该文件后下次进入菜单生效，无需重刷 boot。
 
 把图片 `my-background.png` 放到 `\EFI\visor\backgrounds\`，再修改配置：
 
