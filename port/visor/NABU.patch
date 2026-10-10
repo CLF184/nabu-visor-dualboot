@@ -1,0 +1,359 @@
+diff --git a/src/config/config.c b/src/config/config.c
+index 9647da0..bda3c3f 100644
+--- a/src/config/config.c
++++ b/src/config/config.c
+@@ -1,5 +1,8 @@
+ /* config.c - boot.conf parsing entry point */
+ #include "config_internal.h"
++#ifdef NABU_EMBEDDED
++#include "nabu_visor.h"
++#endif
+ 
+ int config_early_file_log_enabled(void) {
+     int previous = efi_log_file_enabled();
+@@ -187,12 +190,31 @@ EFI_STATUS config_parse(config_t *config) {
+     config->tail = NULL;
+     config->entry_count = 0;
+ 
+-    CHAR16 *buf = read_text_file(CONFIG_FILE);
++    /* nabu：优先读取 \EFI\visor\boot.conf.nabu（便于在不覆盖设备原有 boot.conf 的
++     * 前提下部署本移植的配置），不存在时再读标准 boot.conf。 */
++    CHAR16 *buf = read_text_file(L"\\EFI\\visor\\boot.conf.nabu");
++    if (!buf) buf = read_text_file(CONFIG_FILE);
+     if (!buf) {
++#ifdef NABU_EMBEDDED
++        /* nabu：读不到 ESP 配置时给出内置条目，避免退化为自动发现
++         * （自动发现的条目在安全启动下无法链式加载）。 */
++        efi_log(L"config: boot.conf not found - using built-in nabu entries");
++        boot_entry_t *a = config_add_entry(config, efi_strdup(L"Android"),
++            efi_strdup(L"\\EFI\\visor\\icons\\linux.png"),
++            efi_strdup(L"\\EFI\\visor\\NabuAndroid.efi"), NULL, NULL, NULL, 0, 0, 0);
++        if (a) a->nabu_action = NABU_ACTION_ANDROID;
++        boot_entry_t *w = config_add_entry(config, efi_strdup(L"Windows"),
++            efi_strdup(L"\\EFI\\visor\\icons\\windows.png"),
++            efi_strdup(L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"), NULL, NULL, NULL, 1, 0, 0);
++        if (w) w->nabu_action = NABU_ACTION_BDS;
++        snapshots_apply(config);
++        return EFI_SUCCESS;
++#else
+         efi_log(L"config: boot.conf not found, auto-detecting boot entries");
+         EFI_STATUS st = detect_entries(config);
+         snapshots_apply(config);
+         return st;
++#endif
+     }
+ 
+     UINTN max_lines = 1;
+diff --git a/src/config/config_entry.c b/src/config/config_entry.c
+index 6fb4e13..e038fcf 100644
+--- a/src/config/config_entry.c
++++ b/src/config/config_entry.c
+@@ -83,6 +83,7 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
+     CHAR16 *luks_key_path = NULL;
+     CHAR16 *luks_cmdline = NULL;
+     CHAR16 *luks_preset = NULL;
++    int nabu_action = 0;
+ 
+     int braced = 0;
+     for (CHAR16 *h = lines[*idx]; *h; h++)
+@@ -144,6 +145,17 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
+             } else if (efi_strcmp(key, L"initrd_encrypted") == 0) {
+                 initrd_encrypted = (*value == '1' || *value == 't' || *value == 'y');
+                 initrd_encrypted_set = 1;
++            } else if (efi_strcmp(key, L"nabu_action") == 0) {
++                /* nabu：条目动作。android = 写标记热重启回 Android；
++                 * bds/windows = 把控制权交回固件原始 BDS（Windows 原生流程启动）。 */
++                if (efi_strcmp(value, L"android") == 0) {
++                    nabu_action = 2;
++                } else if (efi_strcmp(value, L"bds") == 0 ||
++                           efi_strcmp(value, L"windows") == 0) {
++                    nabu_action = 1;
++                } else {
++                    efi_log(L"WARN: invalid nabu_action (use android | bds)");
++                }
+             } else if (efi_strcmp(key, L"luks") == 0 ||
+                        efi_strcmp(key, L"luks_password") == 0) {
+                 luks = (*value == '1' || *value == 't' || *value == 'y');
+@@ -186,6 +198,7 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
+             e->luks_key_path = luks_key_path;
+             e->luks_cmdline = luks_cmdline;
+             e->luks_preset = luks_preset;
++            e->nabu_action = nabu_action;
+             luks_key_path = NULL;
+             luks_cmdline = NULL;
+             luks_preset = NULL;
+@@ -290,6 +303,7 @@ boot_entry_t* config_add_entry(config_t *config,
+     entry->luks_cmdline = NULL;
+     entry->luks_preset = NULL;
+     entry->decrypt_password = NULL;
++    entry->nabu_action = 0;
+     entry->hp_volume = NULL;
+     entry->next = NULL;
+     entry->deployments = NULL;
+diff --git a/src/core/main.c b/src/core/main.c
+index 886bc75..27b1e76 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -15,6 +15,9 @@
+ #include "menu_sound.h"
+ #include "capture_rec.h"
+ #include "intro.h"
++#ifdef NABU_EMBEDDED
++#include "nabu_visor.h"
++#endif
+ 
+ EFI_HANDLE IH;
+ 
+@@ -218,6 +221,12 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
+         gui_set_mode(&gui, config.res_w, config.res_h, config.res_max);
+     }
+ 
++#ifdef NABU_EMBEDDED
++    if(EFI_ERROR(nabu_gui_ready(&gui,text_mode))) {
++        if(!text_mode)gui_shutdown(&gui);
++        config_free(&config);return EFI_OUT_OF_RESOURCES;
++    }
++#endif
+     if (config.hotplug) {
+         config_hotplug_arm(&config);
+         efi_log(L"main: hotplug volume watch armed");
+@@ -520,6 +529,12 @@ select_entry:
+         return EFI_SUCCESS;
+     }
+     if (action == VISOR_ACTION_FIRMWARE) {
++#ifdef NABU_EMBEDDED
++        EFI_STATUS reset_status=nabu_power_action(action);
++        gui.timeout_active=0;gui.running=1;force_menu=1;
++        gui.title=reset_status==EFI_UNSUPPORTED?L"Fastboot unavailable":L"Fastboot reset failed";
++        goto select_entry;
++#else
+         if (!text_mode) {
+             gui_fade_out(&gui);
+             gui_shutdown(&gui);
+@@ -541,6 +556,7 @@ select_entry:
+         }
+         RT->ResetSystem(EfiResetCold, EFI_SUCCESS, 0, NULL);
+         return EFI_SUCCESS;
++#endif
+     }
+ 
+     if (!selected) {
+@@ -757,6 +773,18 @@ boot_selected:
+      * usual close in gui_shutdown() stays the normal path. */
+     cap_session_finish();
+ 
++#ifdef NABU_EMBEDDED
++    /* nabu 动作条目：不由 Visor 加载任何镜像，记录动作后干净返回，
++     * 由固件卷内的 Nabu 驱动接管：
++     *   bds     -> 调用固件原始 BDS 入口（Windows 走原生启动流程）
++     *   android -> 驱动写 DRAM 标记并热重启，内核入口分流代码回到 Android */
++    if (selected->nabu_action != NABU_ACTION_NONE) {
++        nabu_exit_action = selected->nabu_action;
++        cleanup_status = EFI_SUCCESS;
++        goto boot_cleanup_return;
++    }
++#endif
++
+     status = visor_boot(selected, ST);
+ 
+     if (!visor_boot_services_active) {
+@@ -804,6 +832,14 @@ boot_selected:
+     efi_print(L"Boot failed - entering recovery\r\n");
+     efi_fs_drivers_set_lazy(1);
+ 
++#ifdef NABU_EMBEDDED
++    /* nabu：启动失败不再进入需要键盘输入的恢复控制台（本机只有音量/电源两个键）。
++     * 直接把控制权交回固件原始 BDS，保证设备始终还能源生启动 Windows，绝不卡死。 */
++    nabu_exit_action = NABU_ACTION_BDS;
++    cleanup_status = status;
++    goto boot_cleanup_return;
++#endif
++
+     action = text_recovery_run(&gui, selected, status, config.quiet);
+ 
+     if (action == VISOR_ACTION_RETRY) {
+@@ -826,6 +862,10 @@ boot_selected:
+         return EFI_SUCCESS;
+     }
+     if (action == VISOR_ACTION_FIRMWARE) {
++#ifdef NABU_EMBEDDED
++        nabu_power_action(action);
++        force_menu=1;goto select_entry;
++#else
+         efi_log(L"recovery: firmware setup requested");
+         UINT64 osind = 0;
+         UINTN  sz = sizeof(osind);
+@@ -836,6 +876,7 @@ boot_selected:
+                         EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS |
+                         EFI_VARIABLE_RUNTIME_ACCESS,
+                         sizeof(osind), &osind);
++#endif
+     }
+ 
+     efi_log(L"recovery: reboot requested");
+diff --git a/src/gui/gui.c b/src/gui/gui.c
+index a382296..eeba331 100644
+--- a/src/gui/gui.c
++++ b/src/gui/gui.c
+@@ -99,6 +99,10 @@ void gui_present_band(gui_state_t *state, INTN y, INTN h) {
+ 
+ static void gui_fb_set_wc(gui_state_t *state) {
+     state->fb_fast = 0;
++#ifdef NABU_EMBEDDED
++    /* Nabu: use its GOP driver and retain the firmware's memory attributes. */
++    return;
++#endif
+     if (!gui_has_linear_fb(state)) return;
+     UINT64 base = (UINT64)state->gop->Mode->FrameBufferBase;
+     UINT64 size = (UINT64)state->gop->Mode->FrameBufferSize;
+@@ -144,8 +148,16 @@ EFI_STATUS gui_init(gui_state_t *state) {
+         return EFI_NOT_FOUND;
+     }
+ 
++#ifdef NABU_EMBEDDED
++    if (!state->gop->Mode || !state->gop->Mode->Info) return EFI_UNSUPPORTED;
++#endif
+     state->screen_width = state->gop->Mode->Info->HorizontalResolution;
+     state->screen_height = state->gop->Mode->Info->VerticalResolution;
++#ifdef NABU_EMBEDDED
++    if (state->screen_width < 320 || state->screen_width > 4096 ||
++        state->screen_height < 240 || state->screen_height > 4096)
++        return EFI_UNSUPPORTED;
++#endif
+     state->bpp = 32;
+     state->pixel_format = state->gop->Mode->Info->PixelFormat;
+ 
+diff --git a/src/gui/gui_image.c b/src/gui/gui_image.c
+index 94923f3..ab0ee99 100644
+--- a/src/gui/gui_image.c
++++ b/src/gui/gui_image.c
+@@ -105,7 +105,7 @@ icon_t* gui_load_image(CHAR16 *path) {
+         for (UINTN x = 0; x < width; x++) {
+             UINT8 *pixel = row + x * bytes_per_px;
+ 
+-            icon->pixels[y * width + x] = (0xFF << 24) | (pixel[2] << 16) | (pixel[1] << 8) | pixel[0];
++            icon->pixels[y * width + x] = (0xFFu << 24) | (pixel[2] << 16) | (pixel[1] << 8) | pixel[0];
+         }
+     }
+ 
+diff --git a/src/gui/gui_panels.c b/src/gui/gui_panels.c
+index 0eb7d9a..6c3c7bc 100644
+--- a/src/gui/gui_panels.c
++++ b/src/gui/gui_panels.c
+@@ -4,7 +4,11 @@
+ static const struct { CHAR16 *label; int action; } POWER_ACTIONS[] = {
+     { L"Shutdown", VISOR_ACTION_SHUTDOWN },
+     { L"Reboot",   VISOR_ACTION_REBOOT   },
++#ifdef NABU_EMBEDDED
++    { L"Fastboot", VISOR_ACTION_FIRMWARE },
++#else
+     { L"Firmware", VISOR_ACTION_FIRMWARE },
++#endif
+ };
+ 
+ void layout_power(gui_state_t *state) {
+diff --git a/src/gui/gui_text.c b/src/gui/gui_text.c
+index 3358f54..005caa2 100644
+--- a/src/gui/gui_text.c
++++ b/src/gui/gui_text.c
+@@ -6,6 +6,14 @@ static const font_t *g_font = &jetbrains_font;
+ static const unsigned char *g_glyph_cov = 0;
+ static const font_t        *g_cov_for   = 0;
+ 
++#ifdef NABU_EMBEDDED
++void nabu_font_release(void) {
++    if (g_glyph_cov) efi_free_pool((void*)g_glyph_cov);
++    g_glyph_cov = 0;
++    g_cov_for = 0;
++}
++#endif
++
+ static void font_ensure_decoded(void) {
+     if (g_cov_for == g_font && g_glyph_cov) return;
+     const font_t *f = g_font;
+diff --git a/src/include/crypto.h b/src/include/crypto.h
+index d28eb84..2375514 100644
+--- a/src/include/crypto.h
++++ b/src/include/crypto.h
+@@ -12,6 +12,7 @@
+ #define VISOR_CRYPT_MAX_ITERATIONS 5000000U
+ #define VISOR_CRYPT_HEADER_AUTH_SIZE 52
+ 
++#pragma pack(push, 1)
+ typedef struct {
+     UINT8  magic[8];
+     UINT32 version;
+@@ -21,6 +22,7 @@ typedef struct {
+     UINT8  nonce[VISOR_CRYPT_NONCE_SIZE];
+     UINT8  tag[VISOR_CRYPT_HASH_SIZE];
+ } __attribute__((packed)) visor_crypt_header_t;
++#pragma pack(pop)
+ 
+ EFI_STATUS visor_decrypt_buffer(const void *input, UINTN input_size,
+                                 CHAR16 *password,
+diff --git a/src/include/gui.h b/src/include/gui.h
+index 15fe0b1..97b1339 100644
+--- a/src/include/gui.h
++++ b/src/include/gui.h
+@@ -123,6 +123,8 @@ typedef struct boot_entry {
+     CHAR16 *uuid;
+     UINTN index;
+     int type;
++    /* nabu 扩展：条目动作（0=普通条目, 1=交回固件 BDS, 2=写标记热重启进 Android） */
++    int nabu_action;
+     icon_t *icon;
+     UINTN   icon_size;
+     color_t color;
+diff --git a/src/include/gui_internal.h b/src/include/gui_internal.h
+index ed0310d..9fd675f 100644
+--- a/src/include/gui_internal.h
++++ b/src/include/gui_internal.h
+@@ -27,7 +27,7 @@ static inline UINTN isqrt_(UINTN n) {
+ }
+ 
+ static inline UINT32 color_to_u32(color_t c) {
+-    return (0xFF << 24) | (c.r << 16) | (c.g << 8) | c.b;
++    return (0xFFu << 24) | (c.r << 16) | (c.g << 8) | c.b;
+ }
+ 
+ static inline UINTN clamp_uintn(UINTN v, UINTN lo, UINTN hi) {
+diff --git a/src/include/linux_boot.h b/src/include/linux_boot.h
+index cd05e6b..c7bb545 100644
+--- a/src/include/linux_boot.h
++++ b/src/include/linux_boot.h
+@@ -10,6 +10,7 @@ typedef struct {
+     UINT32 entry;
+ } setup_header_32_t;
+ 
++#pragma pack(push, 1)
+ typedef struct {
+     UINT8  setup_sects;
+     UINT16 root_flags;
+@@ -61,6 +62,7 @@ typedef struct {
+     UINT32 signature;
+     UINT16 checksum;
+ } __attribute__((packed)) setup_block_t;
++#pragma pack(pop)
+ 
+ #define LINUX_SIGNATURE 0x53726448
+ #define LINUX_SETUP_HEADER_OFFSET 0x1F1u
+diff --git a/src/security/tcg2.c b/src/security/tcg2.c
+index 47eee0c..b5ad0cc 100644
+--- a/src/security/tcg2.c
++++ b/src/security/tcg2.c
+@@ -34,6 +34,7 @@ typedef struct {
+     UINT32         ActivePcrBanks;
+ } tcg2_capability_t;
+ 
++#pragma pack(push, 1)
+ typedef struct {
+     UINT32 HeaderSize;
+     UINT16 HeaderVersion;
+@@ -52,6 +53,7 @@ typedef struct {
+     UINT32 EventSize;
+     UINT8  Event[1];
+ } __attribute__((packed)) tcg2_tagged_event_t;
++#pragma pack(pop)
+ 
+ #define TCG2_EVENT_HDR_BYTES  18
+ #define TCG2_TAGGED_HDR_BYTES  8

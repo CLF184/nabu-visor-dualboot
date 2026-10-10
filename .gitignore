@@ -1,0 +1,17 @@
+# Local builds, firmware inputs and tool installations
+__pycache__/
+*.py[cod]
+.zig-cache/
+*.obj
+/.visor-update/
+/build/
+/dist/
+/tools/python/
+/tools/official/*.exe
+/tools/official/*.img
+/tools/official/*.fd
+/esp/EFI/visor/NabuAndroid.efi
+/esp/EFI/visor/visor.efi
+/esp/EFI/visor/icons/
+/esp/EFI/visor/backgrounds/
+/esp/EFI/visor/logo.png

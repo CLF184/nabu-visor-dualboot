@@ -1,0 +1,9 @@
+[submodule "third_party/visor"]
+	path = third_party/visor
+	url = https://github.com/IO-ZetZor/Visor-BootManager.git
+[submodule "third_party/gnu-efi"]
+	path = third_party/gnu-efi
+	url = https://github.com/ncroxon/gnu-efi.git
+[submodule "third_party/renegade"]
+	path = third_party/renegade
+	url = https://github.com/edk2-porting/edk2-msm.git

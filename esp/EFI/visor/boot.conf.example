@@ -1,0 +1,921 @@
+# ============================================================================
+#  Visor boot manager configuration
+#  Location on the EFI System Partition (ESP):  \EFI\visor\boot.conf
+#
+#  Every key below is shown with its default and commented out, so this file
+#  can be copied as-is: uncomment only what you want to change.
+#
+#  File syntax:
+#    - One  key = value  per line. Whitespace around '=' is ignored.
+#    - '#' starts a comment. Inside a value it only counts when a space comes
+#      before it, so  title_color=#7AA2F7  is a color, not a comment.
+#    - Quote values containing spaces:  cmdline = "root=... rw quiet"
+#      The surrounding quotes are stripped.
+#    - Entry blocks are  entry { ... }  - see "Boot entries" at the bottom.
+#      Blank lines and comments inside a braced block are fine. Without the
+#      braces the first blank line ends the block, so brace your entries.
+#    - Repeating a key keeps the last value. Unknown keys are ignored; an
+#      invalid value is logged and the previous setting kept.
+#
+#  Notes on paths:
+#    - File paths are relative to the root of the filesystem containing the
+#      target and use back-slashes. Assets normally live on the ESP, e.g.
+#      \EFI\visor\icons\arch.png.
+#    - Colors are hex in the form  #RRGGBB  (e.g. #7AA2F7).
+#    - Kernels/initrds on a non-FAT /boot (btrfs, ext4, ...) are unreadable by
+#      UEFI unless you drop an efifs driver into \EFI\visor\drivers\. For a
+#      separate /boot filesystem use \vmlinuz-...; use \boot\vmlinuz-... only
+#      when /boot is a directory inside the root filesystem. Visor also accepts
+#      the older mount-prefixed form when the exact path is absent. A UKI on the
+#      ESP under \EFI\Linux\*.efi always works without a driver.
+#
+#  Layout of this file:
+#      Boot behaviour        what boots, and whether the menu is shown
+#      Entry discovery       where Visor looks when it auto-detects entries
+#      Menu appearance       overall shape of the menu; input devices
+#      Diagnostics           the boot log
+#      Logo / Colors / Blur / Animation / Font sizes / Icons / Underline /
+#      Power actions / Background / Dynamic accent / Themes  - styling
+#      Snapshots             booting into btrfs snapshots
+#      Boot entries          the entry { } blocks themselves
+# ============================================================================
+
+# --- Boot behaviour ---------------------------------------------------------
+# What gets booted, and whether the menu is shown at all.
+
+# Seconds before the default entry auto-boots:
+#    N   wait N seconds, then boot the default entry
+#   -1   never auto-boot - wait for the user to choose
+#    0   boot the default entry immediately (skips the menu entirely)
+timeout=5
+
+# Index of the default entry (0-based, in the order entries appear below).
+default=0
+
+# Skip the menu and boot straight away. 1 = if only one entry exists, boot it; if
+# several exist, boot the remembered/default entry (the one default=/remember_last
+# would have preselected) - all without drawing a menu. Hold any key during power-on
+# to interrupt and show the menu anyway. 0 = always show the menu (default).
+#autoboot=0
+
+# Remember the last-booted entry and preselect it next time (persisted in an NVRAM
+# variable). When on, this OVERRIDES default=. 0 = always honour default=. (alias: remember)
+#remember_last=0
+
+# --- Boot self-heal ---------------------------------------------------------
+# Windows and other OS updates may reorder the NVRAM boot list, remove the
+# Visor Boot#### entry or overwrite the firmware fallback path
+# (\EFI\BOOT\BOOTx64.EFI).  These options let Visor repair the damage
+# automatically at every startup.  Nothing is written when there is nothing
+# to fix, and removable media are always left untouched.
+
+# Master switch. 0 = skip the entire self-heal pass.
+#selfheal=1
+
+# NVRAM Boot-entry policy.
+#   off    - never touch NVRAM variables.
+#   ensure (default) - recreate a missing Visor Boot#### entry; if it has been
+#            removed from BootOrder, append it back at the tail.
+#   first  - same as ensure, plus: when BootCurrent matches the
+#            Visor entry (a normal boot through the firmware boot manager),
+#            keep Visor first in BootOrder.  Only rearranges an existing
+#            order - never invents one.
+# To protect NVRAM from firmware/OS reorder wars, any BootOrder rewrite arms
+# a short cooldown: further rewrites are skipped for the next few boot periods
+# (counted with a small stamp file on the ESP, not in NVRAM).
+# (alias: boot_order)
+#boot_order=ensure
+#selfheal_order=ensure
+
+# Re-copy the running Visor binary to the default fallback path at startup.
+# Windows feature updates and 24H2 may replace \EFI\BOOT\BOOTx64.EFI with
+# a copy of bootmgfw.efi; this restores it.
+#restore_fallback=1
+
+# Global default kernel command line. Applied to any entry that does not set its
+# own cmdline/options - including auto-detected raw kernels (which otherwise have
+# no root=). Per-entry cmdline always wins. (alias: options)
+#cmdline=root=PARTUUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx rw quiet
+
+# 1 = suppress all boot-progress text (plain black screen during hand-off to
+# the OS instead of "Booting <name>..."). 0 = show progress text.
+quiet=0
+
+# Allow editing an entry's kernel command line at the menu: select an entry and
+# press 'e', edit, Enter boots with the change (one-shot, not saved). Set 0 to
+# disable (e.g. on locked-down machines). 1 = on (default).
+#editor=1
+
+# Pressing Esc at the boot menu opens the options / rescue console (the same
+# console Visor drops into after a failed boot): list and pick entries, edit the
+# kernel options for one boot, read boot.log, reboot or enter firmware setup.
+# Esc there returns to the menu.
+
+
+# --- Entry discovery --------------------------------------------------------
+# Where Visor looks for bootable things, and which extra entries it makes up.
+# Auto-detection only runs when this file lists no entry { } blocks of its own.
+
+# How hard Visor looks for entries when boot.conf lists none and it has to
+# auto-detect them.
+#   deep  -> open every filesystem the firmware exposes (default). Finds
+#            kernels that live in /boot on a root filesystem, at the cost of a
+#            few seconds on machines with several disks.
+#   quick -> look only at the volume Visor booted from, the EFI system
+#            partitions and any XBOOTLDR (separate /boot) partition. Much
+#            faster. If a quick scan turns up nothing at all, Visor falls back
+#            to a deep scan rather than showing an empty menu.
+# Aliases: scan_mode; also quick_scan=1 / deep_scan=0, each with the underscore
+# dropped too (quickscan, deepscan).
+#scan=deep
+
+# Live hotplug: while the menu is up, Visor watches for volumes that appear
+# (a USB stick plugged in), scans them for bootable content (Windows, UKIs,
+# kernels, distro loaders, \EFI\BOOT\BOOTX64.EFI) and pops matching entries
+# into the menu - the new icon fades in and the row slides over to make room.
+# Entries are pinned to the volume they were found on. 1 = on (default), 0 = off.
+#hotplug=1
+
+# Also sweep media that was ALREADY plugged in when Visor started. Scanning
+# volumes costs time (and, with a filesystem driver installed, a probe of every
+# partition), so by default this happens only when Visor auto-detected the
+# entries: if boot.conf lists entries, Visor trusts them and only watches for
+# media that appears later. Set to 1 to sweep anyway - it runs after the menu is
+# already on screen, one volume at a time. Alias: hotplug_scan_existing.
+#scan_existing=0
+
+# Auto-generate a "<name> (recovery)" entry for each Linux entry, appending
+# "systemd.unit=rescue.target nomodeset" to its cmdline. 0 = off. (alias: recovery)
+#recovery_entries=0
+
+# Filesystem snapshot booting.  (Full details in the Snapshots section below.)
+#    1         auto (default): load \EFI\visor\snapshots.conf if present, else
+#              auto-detect snapper/Timeshift/plain btrfs snapshots
+#    manifest  use only \EFI\visor\snapshots.conf (no auto-detection)
+#    0         disable snapshot loading entirely
+#snapshots=1
+
+# BLS (Boot Loader Specification) deployment browsing. Always on - no switch
+# needed. Visor scans \loader\entries and \boot\loader\entries on every volume
+# (ESP and XBOOTLDR) and folds matching *.conf files into a single per-OS menu
+# entry whose deployments you cycle with V / Ctrl+arrow. Supported fields:
+#   title version linux        required title plus a linux kernel or an efi
+#   efi   initrd options       program; efi-only entries are chainloaded
+#   machine-id architecture    arch mismatch (e.g. EFIARM on x86_64) is skipped
+#   sort-key                   groups sort by ostree index (newest first) then
+#                              alphabetically by sort-key; repeated initrd and
+#                              options lines accumulate in order. Entry
+#                              basenames ending in +N-M drive the boot-counter
+#                              (tries-left) rollback behaviour.
+#
+
+
+# --- Menu appearance and input ----------------------------------------------
+# The menu's overall shape. Finer styling has its own sections further down
+# (Logo, Colors, Blur, Animation, Font sizes, Icons, Underline, Power actions,
+# Background, Dynamic accent, Themes).
+
+# 1 = use the plain text-console menu instead of the graphical one, even when a
+# graphics adapter is available. Visor ALSO falls back to this text menu
+# automatically if no Graphics Output Protocol is found, so set this only if you
+# prefer the text UI. 0 = graphical menu (default). (alias: text_mode)
+#text_menu=0
+
+# Resolution the graphical menu renders at:
+#   WxH      e.g. 1920x1080 - switch to that exact GOP mode if available
+#   max      use the highest resolution the firmware offers
+#   native   (or absent) keep the firmware's current/native mode (default)
+# If the requested WxH is not in the firmware's mode list, the current mode is
+# kept. Has no effect in text mode.
+#resolution=native
+
+# Menu title shown at the top.
+#   (absent / empty) -> the default title "Visor"
+#   none             -> no title at all
+#   anything else    -> shown verbatim
+#title=My Rig
+
+# Graphical menu - show the name label under each icon. 0 = icons only.
+# An auto-detected menu defaults to icons-only unless you set this. (alias: names)
+#show_names=1
+
+# Graphical menu - show details for the selected entry near the bottom of the
+# screen. When show_names=1 this is path-only; when show_names=0 it shows the
+# name above the path. (alias: centre_info)
+#center_info=0
+
+# How many entries fit on one page. When more exist, chevrons appear and paging
+# cross-fades at anim_speed. Default 3.
+#entries_per_page=3
+
+# Corner radius (in pixels) of the selection highlight / frost box. 0 = built-in
+# default. Larger = rounder; small values = squarer corners. (alias: corner_radius)
+#box_radius=14
+
+# Mouse / touchpad / touchscreen support in the graphical menu. A cursor appears
+# when a pointer device is present; a single click on an icon boots it, and clicks
+# on the power icons trigger them. 1 = on (default), 0 = off. (alias: pointer)
+#mouse=1
+
+# Relative mouse/touchpad movement multiplier. 1 = slowest, 20 = fastest,
+# 4 = default. Absolute touchscreens are mapped directly and ignore this key.
+# Alias: pointer_speed.
+#mouse_speed=4
+
+# Replace the built-in white arrow with your own cursor image. Takes a PNG or
+# BMP; a bare name resolves under \EFI\visor\. "default" (or "arrow") keeps the
+# built-in one. Use a square image with a transparent background - it is scaled
+# to a single square size, so a non-square source gets squashed. Setting this
+# from a theme file works too, so a theme can ship its own pointer.
+# Alias: cursor_image.
+#cursor=cursors/breeze.png
+
+# Rendered edge length of the cursor image in pixels. 0 = use the image's own
+# width. Clamped to 8-128. Has no effect on the built-in arrow.
+#cursor_size=24
+
+# Which pixel of the image is the actual pointer - the one a click lands on,
+# and the one the arrow's tip would be. "X,Y" in image pixels measured from the
+# top-left after cursor_size scaling, or "center" for the middle (what a
+# crosshair wants), or "topleft"/"tip" for the corner. Default is 0,0.
+#cursor_hotspot=0,0
+
+# Text font. Currently only "jetbrains" is bundled. Empty = default.
+#font=jetbrains
+
+
+# --- Diagnostics ------------------------------------------------------------
+
+# Write diagnostics to \EFI\visor\boot.log. Logging is append-only; the file is
+# trimmed to the last few sessions only once it grows past ~128 KiB, and only
+# after the config is parsed, so a boot that hangs early never destroys the
+# previous boot's log. Set this to 0 if Visor stops after "Visor loading..." on
+# firmware with a broken ESP write path. This key is read before any log write.
+# Aliases: boot_log, file_log. Inverse alias: no_log=1.
+#log=1
+
+
+# --- Logo --------------------------------------------------------------------
+# An image drawn in the header, next to the title or on its own. The bundled
+# Visor logo (\EFI\visor\logo.png) is used by default, so you get one without
+# configuring anything. PNG or BMP; transparency is respected, and a square
+# image looks best (it is scaled to a square).
+#   (absent / default) -> the bundled logo
+#   none / off         -> no logo, title only
+#   <path>             -> your own image, e.g. \EFI\visor\mylogo.png
+#logo=\EFI\visor\logo.png
+#
+# How the logo and the title share the header:
+#   title  logo to the left of the title, vertically centred (default)
+#   only   logo alone - the title text is not drawn
+#   above  logo centred above the title
+#   none   no logo (same as logo=none)
+#logo_mode=title
+#
+# Logo edge length in pixels. 0 / absent scales with the title: 1.5x the title
+# height beside it, 2x when standalone or stacked. Capped so the header can
+# never grow into the entry row.
+#logo_size=96
+#
+# Space between logo and title in pixels. Default is half the title height.
+#logo_gap=24
+# (The logo's color lives with the accent keys at the bottom: accent_logo.)
+
+# --- Themes -----------------------------------------------------------------
+# If set, Visor loads \EFI\visor\themes\<name>.conf and the UI values in
+# that file OVERRIDE the ones below. A theme file may contain any of the UI keys
+# in this file (colors, sizes, icons, underline, power, background, title, logo...).
+# Boot entries always stay here in boot.conf - themes are UI-only.
+#   <name>   load \EFI\visor\themes\<name>.conf
+#   random   pick a random theme from \EFI\visor\themes\ on each boot
+#   cycle    advance to the next theme each boot (position saved in NVRAM)
+#theme=nord
+
+# --- Colors -----------------------------------------------------------------
+# Every key that sets a color or an accent takes the same four kinds of value:
+#   0 / off     leave this element alone - its plain color, no accent
+#   1 / on      accent this element with the role it uses by default
+#   <role>      accent it with a specific role of the wallpaper palette:
+#                 primary, on_primary, primary_container, on_primary_container,
+#                 secondary, tertiary, tertiary_container, surface,
+#                 surface_container, on_surface, on_surface_variant, outline
+#   #RRGGBB     an explicit color, which needs no wallpaper and always wins
+# So title_color=#7AA2F7, title_color=tertiary and title_color=0 are all valid.
+# A role only does something when accent=1 and the wallpaper yields a palette;
+# an explicit color works regardless. More specific beats less specific:
+# a per-element key (title_color) beats its group (accent_text) beats accent=.
+#
+# Title text color.
+#title_color=#7AA2F7
+# Default color for every entry's name (per-entry "color=" overrides this).
+#name_color=#C0CAF5
+# Accent color of the selection highlight / underline.
+#highlight_color=#7AA2F7
+# Countdown, hints and other dim labels.
+#info_color=on_surface_variant
+# Menu background fill, used when no background image is set.
+# Alias: background_color.
+#bg_color=#1A1A2E
+
+# --- Blur highlight ---------------------------------------------------------
+# Replace the flat selection card with a blurred-glass panel that follows the
+# selection (entries AND power actions), with softly feathered edges.
+#   blur        = 0       off (flat card)
+#               = 1       frosted glass (blur + light tint)
+#               = clear   clear glass (blur only, no tint)
+#   blur_title  = 1       blurred panel behind the title (static)
+#   blur_color  = #RRGGBB tint colour for frosted mode (default white)
+# The panel blurs the background image, so it looks best over a detailed
+# background. With no background it falls back to a translucent tint.
+#blur=clear
+#blur_title=1
+#blur_color=#FFFFFF
+
+# --- Animation --------------------------------------------------------------
+# Master switch for all GUI animations and fades. 1 = on (default), 0 = instant
+# UI state changes with no intro/outro fade, cross-fade, or selection slide.
+#animation=1
+
+# Selection animation speed, 1 (slow) .. 10 (fast). Default 8. Switching
+# between an entry and a power action cross-fades; moving within a row/column
+# slides. Same speed for both. Ignored when animation=0.
+#anim_speed=8
+
+# Full-screen fade speed for menu fade-in and boot/power fade-out, 1 (slow) ..
+# 10 (fast). Default 10. Ignored when animation=0.
+#fade_speed=10
+
+# --- Font sizes (in pixels; 0 / absent = sensible default) ------------------
+# Title height. Default scales with the screen (~ screen_height / 12).
+#title_size=120
+# Entry-name height. Default is 16.
+#name_size=28
+
+# --- Icons (all in pixels; 0 / absent = sensible default) -------------------
+# Icon edge length (icons are square). Default 64. This is the GLOBAL default;
+# an individual entry can override it with its own "icon_size =" (see below).
+#icon_size=128
+# Horizontal gap between icons. Default 60.
+#icon_spacing=80
+# Vertical center of the icon row. Default = middle of the screen.
+# Icons of different sizes are centered on this line; their labels share one
+# baseline below the tallest icon.
+#icon_y=560
+
+# --- Selection underline (the accent bar under the selected entry) ----------
+# Color. Defaults to highlight_color if not set.
+#underline_color=#7AA2F7
+# Thickness (height) in pixels. Default 4.
+#underline_thickness=6
+# Length (width) in pixels. Default = icon width + a small margin.
+#underline_length=180
+
+# --- Power actions (Shutdown / Reboot / Firmware) ---------------------------
+# Which corner the three actions are stacked in:
+#   bottomright (default) | bottomleft | topright | topleft
+#power_position=bottomright
+# Color of each action's accent (its first letter / hotkey). Each defaults to
+# highlight_color if not set.
+#shutdown_color=#F7768E
+#reboot_color=#E0AF68
+#firmware_color=#9ECE6A
+#
+# Show the three actions as icons instead of text. They are still
+# triggered by the S / R / F keys. Set power_icons=1 and give a PNG for each.
+# Any action without a loaded icon falls back to its text label, so a partial
+# set is fine. power_icon_size is the icon edge length in px (default 40).
+#power_icons=1
+#power_icon_size=44
+#shutdown_icon=\EFI\visor\icons\power_shutdown.png
+#reboot_icon=\EFI\visor\icons\power_reboot.png
+#firmware_icon=\EFI\visor\icons\power_firmware.png
+
+# --- Background -------------------------------------------------------------
+# Full-screen background image (PNG, BMP, GIF or MP4). Omit for a solid
+# backdrop. Animated GIFs and MJPEG MP4s play in a loop; the accent palette
+# is taken from the first frame.
+background=\EFI\visor\backgrounds\default.png
+
+# --- Boot intro --------------------------------------------------------------
+# An optional clip or still shown once before the menu. Unset by default, and
+# inert until intro_media names a file - so adding these keys changes nothing
+# until you point one at real media.
+#
+# Formats: PNG and BMP always work. GIF needs the anim_gif feature, MP4/MOV/
+# M4V (MJPEG only, not H.264) and VBG need anim_mp4. A file this build cannot
+# decode is skipped and the menu opens normally; it never fails the boot.
+#intro_media=\EFI\visor\backgrounds\default.png
+#
+# Milliseconds until the intro hands over on its own, measured from the first
+# frame: loading and decoding a clip happen before the clock starts. Clamped
+# to 5000. Zero turns the intro off, even in manual mode.
+#intro_duration=2000
+#
+# Repeat the clip no matter what loop count the file carries. In automatic
+# mode the intro still ends at intro_duration.
+#intro_loop=0
+#
+# When 0, the intro waits for a key instead of continuing by itself, and
+# intro_duration stops being a deadline. A non-looping clip then holds its
+# last frame. Any key skips the intro and opens the menu.
+#intro_auto_continue=1
+#
+# Where a completed automatic intro leads: "menu" (default) opens the chooser
+# with timeout still counting, "boot" boots the already-selected entry without
+# showing it. A key always opens the menu, even with intro_action=boot.
+#
+# intro_image is an alias for intro_media. Keep autoboot=0 and timeout
+# nonzero or the intro is bypassed entirely - there would be no menu to skip
+# to. animation=0 shows the first frame without motion or fade.
+#intro_action=menu
+
+# --- Dynamic accent (palette from wallpaper) --------------------------------
+# Derive a Material You palette from the background image and apply it to the
+# UI - the same pipeline the caelestia shell uses for the desktop: the
+# wallpaper is quantized (Wu box-cut, 128 colors), a seed color is picked with
+# Material's "Score" algorithm (hue-population x chroma scoring), and the full
+# set of Material dynamic-color roles (primary/secondary/tertiary, surface
+# tones, onSurface text tones, outline) is generated from it for a dark scheme.
+# Elements each get their own role, like a themed desktop app:
+#   primary            selection underline + highlight ("the" accent)
+#   secondary          shutdown / reboot power actions
+#   tertiary           firmware power action (companion accent hue)
+#   onSurface          entry names       (accent_text=1)
+#   onSurfaceVariant   countdown, hints, dim labels
+#   surface            fallback background tint; onPrimaryContainer frost tint
+# Needs a background image; with a solid backdrop it does nothing and the
+# configured colors are kept.
+#   accent            master switch (default 0 = off).
+# All of these take the same values as the color keys above - 0, 1, a role
+# name, or #RRGGBB - so each group can be pointed at a different role:
+#   accent_underline  underline + highlight use primary    (default 1)
+#   accent_icons      power icons/labels use sec/tertiary  (default 1)
+#   accent_text       title/names/dim text use the on* roles (default 0)
+#   accent_os_icons   flatten the per-OS icons to the primary color too
+#                     (default 0; discards brand colors like Ubuntu orange).
+#   accent_logo       tint the logo instead of drawing its own colors, good
+#                     for single-color logos like the bundled one. Defaults to
+#                     whatever accent_text is. Aliases: logo_color.
+#   accent_variant    scheme variant, same names as caelestia. One of:
+#                       tonal       balanced and subtle (caelestia's default)
+#                       neutral     nearly grey, the most restrained
+#                       content     chroma follows the wallpaper's own
+#                       fidelity    like content, stays true to a vivid seed
+#                       vibrant     stronger, more colourful
+#                       expressive  vivid, with a large hue shift between roles
+#                       monochrome  greyscale, no hue
+# Giving accent= itself a role or color makes that the default for every
+# element that has no key of its own. A per-element key always wins, so
+# "accent=1" with "underline_color=#F7768E" keeps that underline red.
+#accent=1
+#accent_underline=1
+#accent_icons=1
+#accent_text=0
+#accent_os_icons=0
+# Aliases: logo_color, accent_logo_color.
+#accent_logo=tertiary
+#accent_variant=tonal
+
+# --- Clock -------------------------------------------------------------------
+# The graphical menu can show a real-time clock. Position, format, size and
+# decoration are configurable; the time is read from the firmware RTC each
+# repaint and only its own rectangle is presented, so a tick does not force a
+# full menu redraw.
+#
+# Clock visibility and color. Both take the unified color grammar described in
+# Colors above (0/off, 1/on, a palette role, or #RRGGBB). Either key does the
+# same thing; show_clock is the historical name.
+#   clock       = 1               on, tinted from the palette (default: off)
+#               = #C0CAF5         on, explicit color (always wins)
+#               = clock           on, explicit "clock" palette role
+#               = 0               off (default)
+#   accent_clock= 1               also from the palette (default 1 when clock is on)
+#   clock_color = #7AA2F7         explicit clock text color (wins over the palette;
+#                                 when set, it still respects show_clock=1/0)
+# Aliases: show_clock is an alias for clock.
+#clock=1
+#show_clock=1
+#accent_clock=1
+#clock_color=#C0CAF5
+#
+# Clock geometry and typography.
+#   clock_size      = 48          height in pixels (0 = scale with the title; alias: clock_px)
+#   clock_format    = 24h         24h (default) or 12h (with AM/PM, no leading zero)
+#   clock_seconds   = 0           also show seconds (extra detail, updates every second)
+#   clock_position  = topright    where it sits: topright | topleft | topcenter | topcentre | top |
+#                                 bottomright | bottomleft | bottomcenter | bottomcentre | bottom |
+#                                 center | centre | middle  (default topright)
+#                                 Hyphens, underscores and spaces are equivalent: "top-right",
+#                                 "top_right" and "top right" all parse the same.
+#   clock_date      = 0           also show the date under the time. Either true/false or a
+#                                 format name: long (default, "Monday, January 5"), iso
+#                                 ("2026-01-05"), dmy ("05/01/26"), mdy ("01/05/26"). Also
+#                                 accepts ymd/eu/us/full aliases and on/off.
+#   clock_date_format = long      format when the date is shown (default long). Same names
+#                                 as clock_date, but without the true/false toggle.
+#   clock_blur      = 0           frosted backing behind the clock text (default 0)
+#   clock_shadow    = 1           drop shadow for contrast (default 1)
+#   clock_sync      = 0           apply the correction the OS publishes in
+#                                 \EFI\visor\time.sync (default 0).
+#
+# Why you might want it: the clock reads the firmware RTC and nothing else.
+# UEFI has no time sync of its own - there is no SNTP client in the spec - so
+# unless your OS writes the RTC back, the RTC free-runs on the board's
+# oscillator and the menu slowly diverges from real time while the desktop
+# hides it behind NTP. Most distros do not write the RTC: on a dual-boot
+# machine, storing local time in hardware breaks a UTC-based other OS.
+#
+# 'visor time-sync --install' publishes the offset from a systemd timer and
+# turns this on. That alone fixes the menu. Add --rtc to have the timer write
+# the hardware clock too, which fixes the drift itself and with it every
+# other consumer of the RTC - the OS's own boot time, logs, TLS, cron.
+#
+# The file holds one signed integer, 'offset=<seconds>', meaning true time
+# minus what the RTC reported. It is a difference rather than a timestamp
+# because GetTime returns local time on some firmware and UTC on others and
+# nothing in pre-OS can tell which. Offsets beyond a day are ignored: that is
+# a machine whose RTC needs fixing, not a correction.
+# Aliases: clock_size <-> clock_px, clock_position <-> clock_pos, clock_sync <-> clock_ntp.
+#clock_size=48
+#clock_px=48
+#clock_format=24h
+#clock_seconds=0
+#clock_position=topright
+#clock_pos=topright
+#clock_date=0
+#clock_date_format=long
+#clock_blur=0
+#clock_shadow=1
+#clock_sync=0
+
+# --- Screensaver -------------------------------------------------------------
+# While the graphical menu is up Visor tracks input. After a period without
+# keys, pointer moves or clicks, the UI elements fade out leaving only the
+# background (plus the clock, if enabled and kept). After a longer idle time
+# the panel blanks to black and stops rendering entirely until the next input.
+# Idle tracking is suspended while the boot countdown is running, while the
+# text editor is open (e), or while the file browser is open — those are
+# active use even without new keystrokes.
+#   screensaver        = 0        master switch (default 0 = off). A bare number
+#                                 such as "screensaver=60" means "on, with a
+#                                 60-second dim delay" (same as screensaver=1 plus
+#                                 screensaver_delay=60).
+#   screensaver_delay  = 60       seconds idle before dimming (default 60; alias:
+#                                 screensaver_timeout)
+#   screensaver_blank  = 600      seconds idle before blanking to black after the
+#                                 dim; 0 disables the blank stage (dim only, default 600;
+#                                 alias: screensaver_blank_delay)
+#   screensaver_clock  = 1        keep the clock visible while dimmed (ignored while
+#                                 blanked, default 1)
+# Aliases: screensaver_delay <-> screensaver_timeout, screensaver_blank <-> screensaver_blank_delay.
+#screensaver=0
+#screensaver_delay=60
+#screensaver_timeout=60
+#screensaver_blank=600
+#screensaver_blank_delay=600
+#screensaver_clock=1
+
+# --- Screenshots and screen recording ----------------------------------------
+# F6 writes a PNG screenshot of the current screen to \EFI\visor\shots.
+# F10 records an animated GIF of the menu: a 3-second countdown (F10 again
+# cancels), then the recording, then the file is written to the same folder.
+# Recordings use one global palette with per-frame deltas, are captured at
+# 20 fps, and are scaled down to at most 960 px wide so a 4K menu does not
+# produce a file nothing will open. Both work in the menu and in the disk
+# corruption warning.
+#   record_seconds   = 3          how long F10 records, in seconds (1-12,
+#                                 default 3). Longer recordings are cut short
+#                                 if they would exceed the 20 MiB encoder
+#                                 budget; whatever was captured is still saved.
+#record_seconds=3
+#
+# Whole-boot recording (recboot feature, needs to be compiled in):
+#   Record the entire boot sequence — fade-in, menu, boot sound, fade-out —
+#   to a single MJPEG+PCM AVI in \EFI\visor\shots\. To arm it, drop an empty
+#   file called  rec.arm  (or  rec.arm.conf  with overrides) on the ESP at:
+#     \EFI\visor\rec.arm
+#   Visor deletes the marker as it starts, so it records exactly one boot and
+#   there is nothing to switch off afterwards.  Without the audio feature the
+#   video is silent.
+#
+#   Optional overrides inside rec.arm (one key=value per line, same syntax
+#   as boot.conf):
+#     fps       = 20     frames per second (default 20; min 5, max 30)
+#     width     = 960    max width in pixels, aspect preserved (default 960;
+#                        min 160, max 1920)
+#     quality   = 80     JPEG quality 20-100 (default 80)
+#
+#   To record: create the marker, reboot.  The file appears as
+#     \EFI\visor\shots\boot_<HHMMSS>.avi
+#   and can be played back with any standard video player (VLC, mpv, ffplay).
+
+# --- TPM2 measured boot ------------------------------------------------------
+# Measure boot artifacts into the TPM2 so a sealed disk or remote-attestation
+# policy can tell what Visor booted. Both measurements use the TCG2
+# HashLogExtendEvent protocol. When no TPM is present Visor logs and continues.
+#   tpm              = 1          master switch (default 1 = on when a TPM is
+#                                 present; alias: measure)
+#   tpm_pcr_config   = 5          PCR for the config file as it sits on disk
+#                                 (the raw boot.conf bytes; 0-23, default 5)
+#   tpm_pcr_cmdline  = 12         PCR for the kernel command line (the LoadOptions
+#                                 string including its terminating NUL, matching
+#                                 systemd's tpm_log_load_options layout so a
+#                                 sealed PCR 12 policy stays portable; 0-23,
+#                                 default 12)
+# Both PCRs publish their active bank list via the Boot Loader Interface variable
+# LoaderTpm2ActivePcrBanks when loader_vars is on. The TPM2 feature is advertised
+# in LoaderFeatures.  Alias: measure is an alias for tpm.
+#tpm=1
+#measure=1
+#tpm_pcr_config=5
+#tpm_pcr_cmdline=12
+
+# --- Sound -------------------------------------------------------------------
+# Visor can play a .wav at startup while the menu initialises. The sound is
+# upsampled and played once through the built-in HDA controller; sounds longer
+# than 4 seconds are truncated at 4.
+#   menu_sound        = path      .wav played once at startup (on by default,
+#                                 but only plays when a path is set;
+#                                 off / 0 / n / f = silent)
+#   menu_sound_volume = 0-100     playback level as a percentage of the recorded
+#                                 volume (default 100 = unchanged). Applied by
+#                                 scaling the samples, so it is independent of
+#                                 the firmware mixer; 0 is silent and values
+#                                 above 100 clamp to 100 - never amplified.
+#menu_sound=\EFI\visor\bootsound.wav
+#menu_sound_volume=60
+
+# --- Boot Loader Interface (systemd) -----------------------------------------
+# Visor can export and honor the systemd Boot Loader Interface EFI variables so
+# OS tooling (bootctl, systemd, composers pinning a default entry) interoperates
+# with it. Variables live under vendor GUID 4a67b082-0a4c-41cf-b6c7-440b29bb8c4f.
+#   loader_vars      = 1          master switch (default 1 = on; alias:
+#                                 loader_interface)
+# When on, Visor:
+#   * exports LoaderInfo ("Visor <version>"), LoaderFirmwareInfo/Type
+#     (firmware vendor/type strings derived from the system table), and
+#     LoaderDevicePartUUID (the partition UUID of the ESP it booted from) if the
+#     firmware has not already published them.
+#   * exports LoaderImageIdentifier (the device path it was launched from) and
+#     LoaderFeatures (bits for ConfigTimeout, EntryDefault/OneShot, MenuDisabled,
+#     etc., plus TPM2 banks when a TPM is active).
+#   * captures LoaderTimeInitUSec at the earliest point in efi_main and
+#     LoaderTimeMenuUSec when the menu first becomes interactive.
+#   * exports LoaderEntries (the ordered list of menu entry identifiers, in
+#     on-screen order) and, just before handing off, LoaderEntrySelected plus
+#     LoaderTimeExecUSec.
+#   * respects LoaderConfigTimeout / LoaderConfigTimeoutOneShot (menu timeout
+#     overrides, with the OneShot consumed as it is read), and
+#     LoaderEntryDefault / LoaderEntryOneShot (preselecting an entry by its
+#     canonical id - the BLS .conf basename when present, otherwise a
+#     slugified display name - with the OneShot also autobooting and being
+#     consumed; the strongest override wins and remember_last is consulted only
+#     when none matched).
+#   * exports LoaderTpm2ActivePcrBanks (hex mask) when TPM is active.
+# 0 disables all of the above. For an OS agent the OneShot variables are the
+# one-boot mechanism: write LoaderEntryOneShot with an entry id and Visor boots
+# it immediately this once, then deletes the variable; ditto for
+# LoaderConfigTimeoutOneShot and the countdown.
+#loader_vars=1
+#loader_interface=1
+
+# --- Snapshots (boot into btrfs snapshots) ----------------------------------
+# Two sources, in priority order:
+#
+# 1. Manifest (recommended): a Linux-side hook mirrors the snapshot list to
+#    the ESP:  \EFI\visor\snapshots.conf  (see tools/visor-snapshot-sync; run
+#    it from a pacman hook or a systemd path unit watching /.snapshots).
+#    The manifest format is snapshot-manager agnostic: each block only needs
+#    an id, a target entry and a complete cmdline. The bundled sync helper uses
+#    Snapper when available and otherwise understands a plain /.snapshots
+#    Snapper-style directory; Timeshift or custom tools can generate the same
+#    manifest format directly. Works on any firmware.
+#
+#    Target an entry with  entry = <exact menu name>  (preferred; os = <text>
+#    stays as a fuzzy fallback). The file is \EFI\visor\snapshots.conf - plural;
+#    the singular snapshot.conf is accepted but logs a warning.
+#
+# 2. Auto-detect (zero-config fallback): when no manifest exists and a btrfs
+#    EFI driver is loaded from \EFI\visor\drivers ('visor drivers' installs
+#    one), Visor detects snapshots itself, trying in order:
+#      - snapper:   <root-subvol>/.snapshots/N/snapshot, the root subvol
+#                   taken from the entry's rootflags=subvol= (@, root,
+#                   @rootfs, custom...), else top level / @ (openSUSE-style
+#                   default-subvol setups); date/desc from info.xml
+#      - Timeshift: timeshift-btrfs/snapshots/<tag>/@ (btrfs mode only);
+#                   date from the tag, desc from info.json
+#      - plain:     subvolumes under /.snapshots, /snapshots or /@snapshots
+#    Each cmdline is the entry's own cmdline with rootflags=subvol=...
+#    rewritten to the snapshot path (other rootflags kept). Needs exactly
+#    one Linux entry with a root= cmdline (multi-distro setups should use
+#    the manifest), newest 12 snapshots, booted with the entry's current
+#    kernel.
+#
+# Each snapshot in the manifest carries id / date / description and the full
+# kernel command line for booting that snapshot (rootflags=subvol=... baked
+# in), plus optional per-snapshot kernel/initrd overrides:
+#
+#   snapshot {
+#       os      = Arch Linux         # boot entry to attach to (name substring)
+#       id      = 42
+#       date    = 2026-07-18 14:22
+#       desc    = pacman -Syu linux
+#       cmdline = root=UUID=... rootflags=subvol=@/.snapshots/42/snapshot ro
+#   }
+#
+# In the menu, press V on an entry to cycle its bottom panel:
+#   entry info -> deployments (BLS/ostree, if several) -> snapshots -> back
+# The snapshot panel unfolds the center info into a browsing list sized to
+# the free space under the icon row. Up/Down (or the mouse wheel) select,
+# Enter boots the selected snapshot (one-shot - nothing is persisted),
+# Esc backs out. Booting a read-only snapper snapshot needs the same distro
+# support (overlayfs initramfs hook / snapper rollback) as grub-btrfs.
+
+# ============================================================================
+#  Menu keys
+#    Left/Right                move between boot entries
+#    Down                      enter the power column (Shutdown), then move down
+#    Up                        move up the power column; from the top, back to entries
+#    Enter                     boot the focused entry / run the focused power action
+#    V                         cycle entry info / deployments / snapshots panel
+#    e                         edit the kernel command line for this boot only
+#                              (needs editor=1)
+#    1-9                       boot entry N directly
+#    S / R / F                 Shutdown / Reboot / Firmware setup (from anywhere)
+#    Esc                       open the options / rescue console: list and pick
+#                              entries, edit kernel options for one boot, read
+#                              boot.log, reboot or enter firmware setup
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+#  Boot entry format
+#    entry {                                    (one block type for everything)
+#        name      = "Display Name"
+#        icon      = \path\to\icon.png        (optional - when omitted Visor
+#                                               derives it from the entry name:
+#                                               "Arch Linux" -> icons\arch.png,
+#                                               a Windows image -> windows.png,
+#                                               anything else -> linux.png)
+#        icon_size = 128                       (optional - overrides global icon_size)
+#        kernel    = \path\to\kernel-or-efi
+#        initrd    = \path\to\initrd          (optional - Linux stub kernels)
+#        cmdline   = "kernel command line"     (optional)
+#        options   = "kernel command line"     (alias for cmdline; systemd-boot style)
+#        color     = #RRGGBB                   (optional per-entry name color)
+#        uuid      = partition-uuid            (optional - pin which partition the
+#                                               kernel/bootmgr lives on, by PARTUUID)
+#        sha256    = <64 hex chars>            (optional - pin the image hash)
+#        encrypted = 1                         (optional - kernel and initrd are
+#                                               Visor encrypted containers)
+#        kernel_encrypted = 1                  (optional - override only kernel)
+#        initrd_encrypted = 1                  (optional - override only initrd)
+#        luks      = 1                         (optional - ask for a LUKS password
+#                                               and inject it as an initrd keyfile;
+#                                               alias: luks_password - a switch,
+#                                               not a place to put a passphrase)
+#        luks_key_path = /crypto_keyfile.bin   (optional - path inside initramfs)
+#        luks_preset = mkinitcpio              (optional - auto-generate keyfile
+#                                               option; mkinitcpio/arch, dracut,
+#                                               systemd; alias: luks_initramfs)
+#        luks_cmdline = "..."                  (optional - manual keyfile option;
+#                                               overrides luks_preset; aliases:
+#                                               luks_options, luks_options_append)
+#        luks_confirm = 1                      (optional - ask for the passphrase
+#                                               twice and compare, see below;
+#                                               alias: luks_verify)
+#        luks_verbose = 1                      (optional - drop quiet/splash from
+#                                               this entry's cmdline, see below;
+#                                               alias: luks_show_prompt)
+#    }
+#
+#  About luks=1 and wrong passphrases: Visor cannot verify the passphrase - it
+#  hands it to the initramfs as a keyfile, and the initramfs is what unlocks the
+#  volume. If the keyfile is rejected the initramfs asks for the passphrase
+#  itself, but with "quiet splash" on the cmdline that prompt is hidden and the
+#  boot looks like a silent hang. Two mitigations:
+#      luks_confirm = 1   type the passphrase twice at the prompt; a mismatch
+#                         reprompts instead of booting with a typo
+#      luks_verbose = 1   remove quiet and splash from this entry's cmdline so
+#                         the initramfs retry prompt is actually visible
+#  At the passphrase prompt, F2 toggles showing what you typed - use it to check
+#  your keyboard layout before pressing Enter.
+#
+#  There is no longer a separate "linux"/"windows" block or a "type=" key:
+#  Visor auto-detects how to boot each entry from the image itself -
+#      * a PE image with no initrd/cmdline   -> chainloaded (e.g. Windows
+#        bootmgfw.efi); loaded by device path so its BCD is found
+#      * a PE image (UKI, or EFI-stub vmlinuz) -> LoadImage/StartImage, with
+#        cmdline and initrd applied if given (initrd via the standard
+#        LINUX_EFI_INITRD_MEDIA_GUID protocol, the same mechanism systemd-boot
+#        uses - so a plain vmlinuz + separate initramfs boots without a UKI)
+#      * a raw (non-PE) kernel               -> Linux EFI handover boot-params
+#  The block names "linux" and "windows" are still accepted as aliases for
+#  "entry" (old configs keep working), but they no longer affect booting.
+#
+#  Auto-detection (used only when boot.conf is absent, or has no entries):
+#    Visor scans the ESP for kernels instead of guessing fixed paths -
+#      * \EFI\Linux\*.efi          Unified Kernel Images (each becomes an entry)
+#      * \boot\vmlinuz*, \vmlinuz* raw kernels (fallback if no UKIs found)
+#      * \EFI\Microsoft\Boot\bootmgfw.efi   Windows Boot Manager
+
+# ----------------------------------------------------------------------------
+
+# Linux example - EFI stub kernel or Unified Kernel Image (UKI).
+# For a UKI, point "kernel" at the .efi and omit initrd/cmdline.
+# For a plain stub kernel, supply initrd and cmdline as shown.
+#entry {
+#    name    = "Arch Linux"
+#    icon    = \EFI\visor\icons\arch.png
+#    color   = #1793D1
+#    kernel  = \vmlinuz-linux
+#    initrd  = \initramfs-linux.img
+#    cmdline = "root=PARTUUID=CHANGE-ME-TO-YOUR-ROOT-PARTUUID......"
+#}
+
+# Encrypted boot artifact example. Create the files with:
+#   python3 tools/visor_encrypt.py vmlinuz-linux vmlinuz-linux.venc
+#   python3 tools/visor_encrypt.py initramfs-linux.img initramfs-linux.img.venc
+# Visor prompts for the password after you select the entry, decrypts the files
+# in memory, then boots the decrypted kernel/UKI/initrd.
+#entry {
+#    name      = "Encrypted Arch"
+#    icon      = \EFI\visor\icons\arch.png
+#    kernel    = \vmlinuz-linux.venc
+#    initrd    = \initramfs-linux.img.venc
+#    encrypted = 1
+#    cmdline   = "root=PARTUUID=CHANGE-ME rw quiet"
+#}
+
+# LUKS root example. Visor does not decrypt the disk itself; it asks for the
+# password, appends it as a temporary keyfile into the initramfs path, and your
+# initramfs/cryptsetup setup unlocks the LUKS device. The keyfile is present in
+# the initrd memory handed to Linux.
+#
+# ---- CRITICAL: mapper-name consistency ----
+# The mapper device name in your kernel cmdline must match what /etc/fstab and
+# /etc/crypttab expect. A mismatch can cause confusing multi-stage boot failures
+# (kernel panic, hung mounts, emergency mode). Follow this checklist:
+#
+# 1. Kernel cmdline (the cmdline= field below):
+#    Use  rd.luks.name=<UUID>=<name>  to force the mapper device to a specific
+#    name.  Do NOT use rd.luks.uuid=<UUID> alone -- that auto-generates the name
+#    "luks-<UUID>", which WILL NOT match a custom root= value.
+#
+#    Example:
+#      rd.luks.name=XXX=cryptroot
+#      root=/dev/mapper/cryptroot
+#
+# 2. /etc/crypttab:
+#    If root decryption is handled entirely via the kernel cmdline (as it is
+#    here), you should REMOVE the root's crypttab entry entirely. Keeping it
+#    causes systemd-cryptsetup to generate a competing service for the same
+#    device, which will fail with "already mapped or mounted" and drag
+#    dependent targets into emergency mode -- even though root itself unlocks
+#    fine.
+#
+# 3. /etc/fstab:
+#    EVERY mount on the LUKS device must use the SAME mapper name as root=.
+#    If you have subvolumes (/, /home, /var, ...), each fstab entry must
+#    reference  /dev/mapper/<name>  -- never the auto-generated luks-<UUID>
+#    or any other name. A single fstab entry with the wrong name will cause
+#    the boot to hang/time out waiting for that device.
+#
+# In short: pick one mapper name, use it consistently in rd.luks.name=, root=,
+# and every fstab mount -- and drop the root's crypttab line.
+# ----
+#entry {
+#    name      = "Arch LUKS"
+#    icon      = \EFI\visor\icons\arch.png
+#    kernel    = \vmlinuz-linux
+#    initrd    = \initramfs-linux.img
+#    cmdline   = "rd.luks.name=XXX=cryptroot root=/dev/mapper/cryptroot rw quiet"
+#    luks      = 1
+#    luks_key_path = /crypto_keyfile.bin
+#    luks_preset = mkinitcpio
+#    # For custom initramfs setups, use luks_cmdline instead.
+#}
+
+# UKI + LUKS example. The UKI is left unchanged; Visor provides a supplemental
+# keyfile-only initrd through the Linux EFI initrd protocol. Your UKI's embedded
+# initramfs must support the generated or manual keyfile option.
+#
+# See the LUKS root example above for the mapper-name consistency checklist
+# (rd.luks.name= / root= / fstab / crypttab must all agree).
+#entry {
+#    name      = "Arch UKI LUKS"
+#    icon      = \EFI\visor\icons\arch.png
+#    kernel    = \EFI\Linux\arch-linux.efi
+#    cmdline   = "rd.luks.name=XXX=cryptroot root=/dev/mapper/cryptroot rw quiet"
+#    luks      = 1
+#    luks_key_path = /crypto_keyfile.bin
+#    luks_preset = mkinitcpio
+#}
+
+# Windows example - chainloads the Windows Boot Manager. "kernel" is the path
+# to bootmgfw.efi; Visor detects the PE image and loads it via its device path
+# so the BCD is found. No type= needed.
+#entry {
+#    name   = "Windows 11"
+#    icon   = \EFI\visor\icons\windows.png
+#    kernel = \EFI\Microsoft\Boot\bootmgfw.efi
+#}
