@@ -4,7 +4,7 @@
 
 沿用 Visor 的外部配置、主题资源和完整 ARM64 功能清单。菜单嵌入 UEFI FD，配置与素材放在平板 ESP 的 `\EFI\visor\`。Android 使用 Renegade 标记配对启动，Windows 继续原固件 BDS 流程，Recovery 启动平板已有的 Recovery。
 
-支持在同一菜单中选择 Android、Windows 和 Linux。Android、Windows、Recovery 按钮与电源＋音量上入口此前已验证；Linux 的 rEFInd 适配已通过 `fastboot boot` 临时启动 Ubuntu。**最新关闭日志的镜像已通过构建检查，尚未实机测试；其他系统也未在本次镜像上重新回归。** 每次构建的结果以 `dist/manifest.json` 为准，不自动继承旧镜像的验证状态。
+支持在同一菜单中选择 Android、Windows 和 Linux，也可通过菜单按钮或电源＋音量上进入 Recovery。
 
 ## 获取源码与准备依赖
 
@@ -68,11 +68,11 @@ py build.py --boot "E:\path\original-android-boot.img" --fd "E:\path\new-nabu.fd
 | `nabu-visor.fd` | 已加入菜单的固件 FD |
 | `NabuBootMenu.efi` / `NabuAndroid.efi` | 菜单驱动与独立 Android EFI 程序 |
 | `RenegadeMarkerLoops.bin` | 配对标记循环与原厂 Recovery 入口代码 |
-| `manifest.json` / `SHA256SUMS.txt` | 构建来源、验证状态与文件校验值 |
+| `manifest.json` / `SHA256SUMS.txt` | 构建来源与文件校验值 |
 
 ## 安装与回滚
 
-先备份平板现有 boot 镜像和 ESP 的 `\EFI\visor\` 配置。解压 `nabu-visor-esp.zip`，把其中的 `EFI/visor/` 复制到**平板 EFI 分区**的 `\EFI\visor\`，然后沿用本机已成功的 boot 分区刷入方式：
+先备份平板现有 boot 镜像和 ESP 的 `\EFI\visor\` 配置。解压 `nabu-visor-esp.zip`，把其中的 `EFI/visor/` 复制到**平板 EFI 分区**的 `\EFI\visor\`，然后刷入 boot 分区：
 
 ```powershell
 fastboot devices
@@ -134,15 +134,15 @@ py build.py
 
 只检查兼容性：`py update_visor.py --check-only`。脚本不刷机，补丁冲突或编译失败时停止；参数和恢复方式见 [上游更新说明](docs/UPSTREAM_UPDATE.md)。
 
-Windows 更新只替换 ESP 引导文件时，无需重新构建。要更新 boot 中的 UEFI，取得原始 nabu `.fd` 后，用 `--fd` 重新构建并刷入生成的 boot。UEFI `.img` 或更新包需先提取 FD；新输入须符合 nabu/SM8150 工具链布局，并重新确认真机启动。
+Windows 更新只替换 ESP 引导文件时，无需重新构建。要更新 boot 中的 UEFI，取得原始 nabu `.fd` 后，用 `--fd` 重新构建并刷入生成的 boot。UEFI `.img` 或更新包需先提取 FD；新输入须符合 nabu/SM8150 工具链布局。
 
-菜单可以添加其他系统。普通条目不设置 `nabu_action`，沿用 Visor 的 EFI 加载流程，可配置 ARM64 EFI 引导程序或 EFI Stub 内核；Linux 的设备树/ACPI、参数和固件兼容性仍需实际验证。
+菜单可以添加其他系统。普通条目不设置 `nabu_action`，沿用 Visor 的 EFI 加载流程，可配置 ARM64 EFI 引导程序或 EFI Stub 内核；Linux 需使用适配 nabu 的内核、设备树/ACPI 和启动参数。
 
 三系统配置保留 Android 的 `nabu_action=android`、Windows 的 `nabu_action=bds`，并为每个 Linux 条目设置 `nabu_action=linux`。Windows 的 BDS 动作跟随固件默认启动项，因此安装 Linux 时应保留 Windows 为该默认目标；Linux 则通过下述独立 rEFInd 目录加载。
 
 ## Linux：复用 Nabu rEFInd
 
-Linux 条目设置 `nabu_action=linux`，走 `Visor → 原版 Nabu rEFInd → 所选 Linux 引导文件`。可以配置多个发行版，或把目标设为 ARM64 GRUB/shim；发行版内核仍需适配 nabu。当前实现已通过构建、主机模拟检查和本机 Ubuntu 临时启动；其他发行版仍需实际验证。
+Linux 条目设置 `nabu_action=linux`，走 `Visor → 原版 Nabu rEFInd → 所选 Linux 引导文件`。可以配置多个发行版，或把目标设为 ARM64 GRUB/shim；发行版内核仍需适配 nabu。
 
 先按 [TheMojoMan/xiaomi-nabu](https://github.com/TheMojoMan/xiaomi-nabu) 准备 Linux 根分区和 EFI 文件，再准备项目配套 `efi.tar`。在本项目目录运行：
 
