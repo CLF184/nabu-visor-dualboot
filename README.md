@@ -39,7 +39,7 @@ Visor 的当前提交也记录在 `port/visor-upstream.json`。nabu 补丁位于
 | `manifest.json` | 输入输出来源、哈希、检查与真机结果 |
 | `SHA256SUMS.txt` | 文件 SHA-256 校验值 |
 
-已有可用的 Visor ESP 配置时，只更新 boot 镜像即可。菜单程序位于 FD 中，外观配置与素材位于 ESP。
+菜单程序位于 FD 中，外观配置与素材位于 ESP。更新旧版时必须检查实际使用的 `\EFI\visor\boot.conf`：Android 条目应有 `nabu_action=android`，Windows 条目应有 `nabu_action=bds`。缺少这两个键会改走普通 EFI 加载路径；旧 `NabuAndroid.efi` 也需替换为本次生成的配套文件。保留自己的背景与标题设置即可。
 
 ## 菜单操作与启动流程
 
@@ -47,6 +47,7 @@ Visor 的当前提交也记录在 `port/visor-upstream.json`。nabu 补丁位于
 - 电源键：松开时确认当前选项。
 - 首次 5 秒无操作：自动选 Android；有操作后本次不再自动启动。
 - 左下角三个按钮：关机、重启、**Recovery**。Recovery 沿用原版固件设置图标。
+- 原厂 Recovery 开机环境（含电源＋音量上）：内核入口读取原厂设备树，识别后直接继续原内核，无需额外重启；用户已确认上一份候选的按键入口有效。`fastboot reboot recovery`／`adb reboot recovery` 在 bootloader 提供相同 Recovery 启动环境时也走此入口；已移除开机 BCB 自检，菜单 Recovery 按钮仍保留写请求与热重启。
 - 保留上游键盘、编辑器、文件浏览等功能。Esc 打开 Visor 故障恢复控制台，它与 Android Recovery 是两个不同入口。
 
 | 选择 | 实际操作 |

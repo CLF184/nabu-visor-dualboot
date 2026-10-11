@@ -1,6 +1,6 @@
 # 当前 nabu 移植实现
 
-本机已有反馈：Android 标记配对方案成功；Windows 原始 BDS 流程成功；用户于 2026-10-10 确认 Recovery 按钮可直接进入 Recovery。Linux 尚未在本机验证。
+本机已有反馈：Android 标记配对方案成功；Windows 原始 BDS 流程成功；用户于 2026-10-10 确认 Recovery 按钮可直接进入 Recovery。2026-10-11 移除开机 BCB 自检并修复平板旧配置和旧 Android EFI 后，最新镜像刷入 boot_a，用户确认一切正常。Linux 尚未在本机验证。
 
 ## 菜单与固件
 
@@ -14,7 +14,7 @@ Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。上游 `Re
 
 写入端将 `0x17FE00000` 的 128 个半字设为 `0x5241`，写回并失效全部 256 字节缓存，调用 `EfiResetWarm`。EDK2 到 GNU-EFI 的适配只有运行时表和库函数桥接；缓存行大小从 `CTR_EL0` 读取。
 
-接收端沿用上游 `BootShim.Dualboot.S` 的扫描和清除循环，将 76 字节接收代码追加在 FD 后。任意标记匹配时，清空全部 256 字节，再跳回原内核；未匹配时接回官方 Nabu2 的 FD 复制入口。原 Android 内核 `0xb0` 后的主体、原 FD 入口约定和解压后的 ramdisk 保留。
+接收端沿用上游 `BootShim.Dualboot.S` 的扫描和清除循环，与原厂 Recovery 识别代码一起追加在 FD 后（当前合计 992 字节）。任意标记匹配时，清空全部 256 字节，再跳回原内核；未匹配时接回官方 Nabu2 的 FD 复制入口。原 Android 内核 `0xb0` 后的主体、原 FD 入口约定和解压后的 ramdisk 保留。
 
 标记表示“下一次绕过菜单进入原内核”，并不单独指定 Android 或 Recovery；具体启动目标还取决于原厂 bootloader 准备的启动模式。
 
@@ -33,7 +33,21 @@ Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。上游 `Re
 
 按钮进入平板已经安装的 Recovery，不直接加载 Linux 内核，不写入提供过的 TWRP 文件，也不更换固件重启驱动。
 
+### 原厂 Recovery 启动
+
+2026-10-11 对照采集：用户正常进入 Android 时，`ro.boot.force_normal_boot=1`；在旧磁吸版 boot 中通过电源＋音量上进入 Recovery 时，原厂 FDT 的 `/chosen/bootargs` 不含 `androidboot.force_normal_boot=1`。随后在同一旧磁吸版上实际执行 `fastboot reboot recovery`，采集结果也不含该参数。两份真实 FDT 均通过候选入口的 AArch64 模拟检查；正常启动参数、原标记协议与无效 FDT 兜底也通过检查。这是 recovery-as-boot 的启动约定，见 [AOSP ramdisk 文档](https://source.android.com/docs/core/architecture/partitions/ramdisk-partitions)。Recovery 抓取中 BCB command 已为空，不能据此判断 bootloader 先前是否读取或修改过 BCB。
+
+当前磁吸 boot 的入口先检查硬件状态，再选择原内核或 FD。它没有独立的按键 Recovery 加载器；跳回原内核时保留原厂传入的启动环境。FD 交接代码会覆盖 x0/x1，因此新增判断放在该交接之前，而非 Visor 菜单中。
+
+`port/recovery/native_entry.S` 在原版 Renegade 标记扫描未命中后，只读检查 x0 指向的 FDT。仅在 FDT 版本、范围、节点与字符串边界有效，根 model 为 `NABU`，`/chosen/bootargs` 有 `androidboot.hardware=qcom` 且没有正常启动参数时，使用上游清除标记循环并跳回原内核。它保留 x0～x3、原 FDT 与 ramdisk，不使用栈，不写 BCB，不重启。正常启动或数据无效/不匹配时仍进入原 FD/Visor。此判断针对当前 nabu 命令行协议，不解析其他内核的 bootconfig。
+
+由此保留原厂电源＋音量上 Recovery 启动环境；原厂已为 `fastboot reboot recovery` 或 `adb reboot recovery` 准备相同环境时也可直接继续。用户已确认上一份候选的电源＋音量上入口有效；后续生成的镜像仍需核对实际启动结果。
+
+按用户要求移除 DeepSeek 增加的菜单前 BCB 检查；开机不再读取 misc 请求并自动热重启。菜单中的 Recovery 按钮仍保留写入请求、标记与热重启流程。
+
 ## Windows 与 Linux
+
+旧版 ESP 配置迁移时必须在实际 `boot.conf` 补齐 Android 的 `nabu_action=android` 与 Windows 的 `nabu_action=bds`。2026-10-11 实机读取发现缺少这两个键，且外部 Android EFI 为旧版本；这会选择普通 EFI 加载路径，绕过已验证的标记桥接与 Windows BDS。更新时保留用户外观设置。补齐配置、更新 EFI 并刷入去除开机 BCB 自检的新镜像后，用户确认一切正常。
 
 Windows 的动作条目 `nabu_action=bds` 干净退出 Visor，再执行原固件 BDS。配置中的 Windows 路径不作为这条动作的实际 LoadImage 目标。因此当前行为跟随固件正常默认启动流程。
 

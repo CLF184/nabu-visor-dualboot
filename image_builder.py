@@ -257,7 +257,9 @@ def main():
     # The original header and Nabu FD handoff occupy 0x00..0xaf. Put the
     # unchanged marker loops AFTER the FD, retaining all original kernel bytes.
     assembly = work/'RenegadeMarkerLoops.S'
-    assembly.write_text('.text\n_Start:'+test_loop+'\nb _CopyUEFI\n_ClearFlags:'+clear_loop, encoding='utf-8')
+    native_entry = (recovery_port/'native_entry.S') if args.recovery_port else None
+    native_guard = native_entry.read_text(encoding='utf-8') if native_entry else 'b _CopyUEFI\n'
+    assembly.write_text('.text\n_Start:'+test_loop+'\n'+native_guard+'\n_ClearFlags:'+clear_loop, encoding='utf-8')
     obj = work/'RenegadeMarkerLoops.o'
     run(zig, 'cc', '-target', 'aarch64-freestanding-none', '-c', assembly, '-o', obj)
     helper = helper_text(obj, origin)
@@ -336,11 +338,21 @@ def main():
             p: sha(path.read_bytes()) for p, path in overlays.items()
         }
         manifest['recovery_sources']['port/recovery/recovery.c'] = sha(recovery_sources[0].read_bytes())
+        manifest['recovery_sources']['port/recovery/native_entry.S'] = sha(native_entry.read_bytes())
+        manifest['native_recovery_protocol'] = {
+            'input': 'original bootloader FDT pointer in x0, before the Nabu FD handoff',
+            'recognition': 'valid bounded v17 FDT; root model NABU; chosen/bootargs has androidboot.hardware=qcom and omits androidboot.force_normal_boot=1',
+            'action': 'use the unchanged Renegade clear loop then branch to the original kernel; no BCB write or reset',
+            'preserved': 'x0-x3, original FDT and ramdisk; no stack required',
+            'fallback': 'invalid or unrecognised FDT continues the existing FD/Visor flow; no boot-time BCB detection',
+            'scope': 'nabu recovery-as-boot using kernel command-line parameters; not a bootconfig parser',
+        }
         manifest['notes'] = [
             'Newly generated image; requires hardware verification even though the released implementation was tested.',
             'Android uses the same paired Renegade markers previously verified by the user.',
             'Windows BDS, Visor UI/config/assets, keys and 5-second idle behavior retained.',
             'The third button writes the Recovery BCB, then reuses the existing Renegade marker/warm-reset bridge to bypass Visor once.',
+            'Native Recovery boot context from the original FDT bypasses Visor without an additional reboot, including the power/volume-up path. The previous build was confirmed for keys; this generated image still requires verification.',
             'The provided TWRP file is not embedded or flashed; the installed Recovery is used.',
             'No old Qualcomm reset driver, direct Linux loader or extra SimpleInit menu.',
         ]
