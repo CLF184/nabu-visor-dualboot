@@ -4,7 +4,7 @@
 // 与首次移植（失败版本）的关键差别，也是本版修掉的两个黑屏原因：
 //   - 选 Windows：不自行链式加载镜像，而是从 Visor 干净返回后调用固件
 //     **原始 BDS 入口**，让固件用它自己的完整流程启动 Windows（与未修改固件一致）。
-//   - 选 Android：直接写 DRAM 标记 + Stall(0.5s) + 热重启（照抄固件内参考实现），
+//   - 选 Android：调用 Renegade 原版程序写入 128 个标记并热重启，
 //     不依赖 ESP 上的任何程序，也不受安全启动签名限制。
 const std = @import("std");
 const uefi = std.os.uefi;

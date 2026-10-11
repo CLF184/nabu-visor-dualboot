@@ -3,7 +3,6 @@
 上游：IO-ZetZor/Visor-BootManager commit 71a05b5945e37903cfeeaf69c76220fdf5861ac9。
 """
 from pathlib import Path
-import shutil
 import re
 import json
 
@@ -64,7 +63,7 @@ def prepare():
     header += [f'#define VISOR_HAS_{f.upper()} {int(f in on)}' for f in registry()['FEAT_ALL'].split()]
     (ROOT / 'build/visor_features.h').write_text('\n'.join(header + ['#endif', '']))
     manifest = {'v': 1, 'ver': visor_version(), 'arch': 'aarch64', 'profile': 'full',
-                'feat': on, 'nabu_adapter': 'esp-application'}
+                'feat': on, 'nabu_adapter': 'fd-dxe-bds'}
     payload = 'VISORFT1' + json.dumps(manifest, separators=(',', ':')) + 'VISORFTEND'
     (ROOT / 'build/visor_manifest.c').write_text(
         'const char visor_build_manifest[] = ' + json.dumps(payload) + ';\n')
@@ -78,16 +77,3 @@ def flags(host=False):
         '-Ithird_party/gnu-efi/inc', '-Ithird_party/gnu-efi/inc/aarch64', '-Ibuild',
         '-include', 'build/visor_features.h', f'-DVISOR_VERSION=L"{visor_version()}"',
         '-Os', '-Wno-incompatible-pointer-types']
-
-
-def prepare_esp():
-    target = ROOT / 'esp/EFI/visor'
-    target.mkdir(parents=True, exist_ok=True)
-    # config/boot.conf 是配制源；每次构建都同步到 ESP 输出目录。
-    shutil.copy2(ROOT / 'config/boot.conf', target / 'boot.conf')
-    shutil.copytree(ROOT / 'third_party/visor/assets/icons', target / 'icons', dirs_exist_ok=True)
-    shutil.copytree(ROOT / 'third_party/visor/assets/backgrounds', target / 'backgrounds', dirs_exist_ok=True)
-    shutil.copy2(ROOT / 'third_party/visor/assets/logo.png', target / 'logo.png')
-    shutil.copy2(ROOT / 'third_party/visor/boot.conf.example', target / 'boot.conf.example')
-    shutil.copy2(ROOT / 'build/visor.efi', target / 'visor.efi')
-    shutil.copy2(ROOT / 'build/NabuAndroid.efi', target / 'NabuAndroid.efi')

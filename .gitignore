@@ -15,3 +15,6 @@ __pycache__/
 /esp/EFI/visor/icons/
 /esp/EFI/visor/backgrounds/
 /esp/EFI/visor/logo.png
+
+# Last successful build backup (including custom output directories)
+.build-backup/

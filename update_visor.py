@@ -247,7 +247,7 @@ def update(args):
             git('apply', '--check', '--whitespace=nowarn', patch, cwd=upstream)
             project = work/'project'
             project.mkdir()
-            for name in ('build.py', 'image_builder.py', 'fd_patch.py', 'patch_boot.py', 'visor_build.py'):
+            for name in ('build.py', 'image_builder.py', 'build_publish.py', 'fd_patch.py', 'patch_boot.py', 'visor_build.py'):
                 shutil.copy2(root/name, project/name)
             for name in ('src', 'port', 'config', 'esp'):
                 copy_tree(root/name, project/name)

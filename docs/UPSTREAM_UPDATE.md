@@ -6,7 +6,7 @@
 py update_visor.py
 ```
 
-需要 Python 3、Git for Windows 和能够访问 GitHub 的网络。Zig 与补丁工具沿用工程自带依赖。
+需要 Python 3、Git for Windows 和能够访问 GitHub 的网络。Zig、补丁工具与原始镜像按 README 准备。
 
 默认获取上游 `main` 的最新提交。如果当前已是这个 commit，则显示“无需更新”。发现新 commit 时，脚本会：
 
@@ -62,7 +62,7 @@ py update_visor.py --source "E:\你的文件夹\Visor-BootManager" --ref 71a05b5
 
 初始上游基线为 `71a05b5945e37903cfeeaf69c76220fdf5861ac9`。当前准确版本、补丁哈希和源码校验值以 `port/visor-upstream.json` 为准；新的镜像 manifest 也记录这些信息。
 
-`NABU.patch` 覆盖当前已验证的 12 个上游文件适配，包含 `nabu_action` 配置解析、Android/BDS 交接、菜单硬件接口和 ABI 适配。`port/recovery/overlay.py` 继续处理 Recovery 按钮标签与请求错误显示；`port/renegade/` 继续提供已经验证的 Android 标记配对实现。
+`NABU.patch` 集中维护上游文件适配，包含 `nabu_action` 配置解析、Android/BDS 交接、菜单硬件接口和 ABI 适配。`port/recovery/overlay.py` 继续处理 Recovery 按钮标签与请求错误显示；`port/renegade/` 提供 ABI 桥接与兼容头文件，标记程序和接收循环读取 Renegade 子模块源码。
 
 上游项目：[IO-ZetZor/Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)。上游 `visor update` 适用于其原版 ESP 安装方式，不更新本工程 FD 内的菜单。
 

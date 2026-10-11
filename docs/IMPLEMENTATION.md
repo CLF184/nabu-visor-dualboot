@@ -1,24 +1,28 @@
-# 当前 nabu 移植实现
+# nabu 移植实现
 
-本机已有反馈：Android 标记配对方案成功；Windows 原始 BDS 流程成功；用户于 2026-10-10 确认 Recovery 按钮可直接进入 Recovery。2026-10-11 移除开机 BCB 自检并修复平板旧配置和旧 Android EFI 后，最新镜像刷入 boot_a，用户确认一切正常。Linux 尚未在本机验证。
+本项目以 Visor 的完整 ARM64 功能清单为基础。适配集中在平台接口、FD/BDS 交接、Android 标记启动和 Recovery 请求，保留上游配置格式、外部资源与普通 EFI 加载逻辑。
+
+此前交付镜像已验证 Android、Windows、Recovery 按钮和按键入口。最新构建包含浏览路径优先、上游错误恢复及构建发布修复，已通过编译和镜像校验，尚未真机验证。Linux 未在本机验证，具体成品状态见构建输出的 `manifest.json`。
 
 ## 菜单与固件
 
-Visor 编译为 AArch64 DXE 驱动 `NabuBootMenu.efi`，插入基础 FD，挂接原 BDS 入口并在其前显示菜单。配置统一从 ESP 的 `\EFI\visor\boot.conf` 读取，使用上游 `CONFIG_FILE` 常量；图标、背景继续从 ESP 的 `\EFI\visor\` 加载。基础 FD 的其他可执行模块保留原字节。
+Visor 编译为 AArch64 DXE 驱动 `NabuBootMenu.efi`，插入基础 FD，挂接原 BDS 入口并在其前显示菜单。配置使用上游 `CONFIG_FILE` 常量，统一读取 ESP 的 `\EFI\visor\boot.conf`；图标和背景继续从 `\EFI\visor\` 加载。基础 FD 的其他可执行模块保留原字节。
 
-横屏、音量键轮流选择系统和电源动作、电源松开确认是 nabu 适配。初始 5 秒无输入自动 Android，输入后取消本次倒计时。构建按上游完整功能清单处理，只遵循其 ARM64 架构限制。
+横屏、音量键切换系统及电源动作、电源键松开确认是 nabu 适配。默认首次 5 秒无输入自动启动 Android，输入后取消本次倒计时。功能启用范围仅遵循上游 ARM64 架构和依赖限制。
 
 ## Android 标记配对
 
-Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。上游 `Reboot2PayloadApp.c` 从 `third_party/renegade/` 子模块直接读取，构建校验 Git blob。
+Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。构建直接读取子模块中的 `Reboot2PayloadApp.c` 并校验 Git blob。
 
-写入端将 `0x17FE00000` 的 128 个半字设为 `0x5241`，写回并失效全部 256 字节缓存，调用 `EfiResetWarm`。EDK2 到 GNU-EFI 的适配只有运行时表和库函数桥接；缓存行大小从 `CTR_EL0` 读取。
+写入端将 `0x17FE00000` 的 128 个半字设为 `0x5241`，写回并失效全部 256 字节缓存，然后调用 `EfiResetWarm`。EDK2 到 GNU-EFI 的适配通过运行时表和库函数桥接完成；缓存行大小从 `CTR_EL0` 读取。
 
-接收端沿用上游 `BootShim.Dualboot.S` 的扫描和清除循环，与原厂 Recovery 识别代码一起追加在 FD 后（当前合计 992 字节）。任意标记匹配时，清空全部 256 字节，再跳回原内核；未匹配时接回官方 Nabu2 的 FD 复制入口。原 Android 内核 `0xb0` 后的主体、原 FD 入口约定和解压后的 ramdisk 保留。
+接收端沿用上游 `BootShim.Dualboot.S` 的扫描和清除循环，与原厂 Recovery 识别代码一起追加在 FD 后。任意标记匹配时，清空全部 256 字节并跳回原内核；未匹配且不是原厂 Recovery 环境时，接回 Nabu2 的 FD 复制入口。原 Android 内核 `0xb0` 后的主体和解压后的 ramdisk 保留。
 
-标记表示“下一次绕过菜单进入原内核”，并不单独指定 Android 或 Recovery；具体启动目标还取决于原厂 bootloader 准备的启动模式。
+标记只表示“下一次绕过菜单进入原内核”。Android 或 Recovery 的实际目标由原厂 bootloader 准备的启动环境决定。菜单驱动与独立 Android EFI 共用 `src/nabu_reset.zig`，通过 `port/renegade/bridge.c` 调用同一套上游程序。
 
 ## Recovery
+
+### 菜单按钮
 
 `port/recovery/recovery.c` 按 GPT 分区名找到唯一 `misc` 逻辑分区，更新 AOSP BCB：
 
@@ -27,46 +31,38 @@ Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。上游 `Re
 | command | 0 / 32 字节 | `boot-recovery` |
 | recovery | 64 / 768 字节 | `recovery\n` |
 
-仅这两个字段改变。512 字节块读写开头 2048 字节；4096 字节块读写完整 4096 字节并保留其他内容。写入、刷新和读回核对通过后，调用已经验证的 `nabu_renegade_android` 桥接函数，写一次性标记并热重启。因此 Recovery 启动不会再次停在 Visor。
+仅这两个字段改变。512 字节块读写开头 2048 字节；4096 字节块读写完整 4096 字节并保留其他内容。写入、刷新与读回核对成功后，调用 Android 的标记桥接函数并热重启，下一次启动绕过菜单。
 
-请求写入失败时不写标记、不重启，并尝试恢复原始 BCB。若恢复也失败，显示对应提示。沿用的上游标记程序在 ResetSystem 异常返回时进入 `CpuDeadLoop`。
+请求写入失败时不写标记、不重启，并尝试恢复原始 BCB；恢复失败会显示原因。上游标记程序在 `ResetSystem` 异常返回时进入 `CpuDeadLoop`。按钮使用平板已有的 Recovery，不嵌入或替换 Recovery 镜像。
 
-按钮进入平板已经安装的 Recovery，不直接加载 Linux 内核，不写入提供过的 TWRP 文件，也不更换固件重启驱动。
+### 原厂 Recovery 入口
 
-### 原厂 Recovery 启动
+当前 nabu 的正常启动 FDT 含 `androidboot.force_normal_boot=1`，按键或 `fastboot reboot recovery` 的 Recovery 环境不含该参数。判断放在内核入口、FD 交接之前，以保留原厂传入的启动寄存器和设备树。
 
-2026-10-11 对照采集：用户正常进入 Android 时，`ro.boot.force_normal_boot=1`；在旧磁吸版 boot 中通过电源＋音量上进入 Recovery 时，原厂 FDT 的 `/chosen/bootargs` 不含 `androidboot.force_normal_boot=1`。随后在同一旧磁吸版上实际执行 `fastboot reboot recovery`，采集结果也不含该参数。两份真实 FDT 均通过候选入口的 AArch64 模拟检查；正常启动参数、原标记协议与无效 FDT 兜底也通过检查。这是 recovery-as-boot 的启动约定，见 [AOSP ramdisk 文档](https://source.android.com/docs/core/architecture/partitions/ramdisk-partitions)。Recovery 抓取中 BCB command 已为空，不能据此判断 bootloader 先前是否读取或修改过 BCB。
+`port/recovery/native_entry.S` 在 Renegade 标记未命中后，只读检查 x0 指向的 FDT。仅当版本、范围、节点与字符串边界有效，根 model 为 `NABU`，`/chosen/bootargs` 含 `androidboot.hardware=qcom` 且不含正常启动参数时，清除标记并跳回原内核。保留 x0～x3、FDT 与 ramdisk，不使用栈、不写 BCB、不重启。正常启动或无效/不匹配的数据仍进入 FD/Visor。
 
-当前磁吸 boot 的入口先检查硬件状态，再选择原内核或 FD。它没有独立的按键 Recovery 加载器；跳回原内核时保留原厂传入的启动环境。FD 交接代码会覆盖 x0/x1，因此新增判断放在该交接之前，而非 Visor 菜单中。
+这保留了电源＋音量上的原厂 Recovery 入口；bootloader 为 `fastboot reboot recovery` 或 `adb reboot recovery` 提供相同环境时也直接继续原内核。判断针对当前 nabu 的命令行协议，不解析 bootconfig。相关启动约定见 [AOSP ramdisk 文档](https://source.android.com/docs/core/architecture/partitions/ramdisk-partitions)。
 
-`port/recovery/native_entry.S` 在原版 Renegade 标记扫描未命中后，只读检查 x0 指向的 FDT。仅在 FDT 版本、范围、节点与字符串边界有效，根 model 为 `NABU`，`/chosen/bootargs` 有 `androidboot.hardware=qcom` 且没有正常启动参数时，使用上游清除标记循环并跳回原内核。它保留 x0～x3、原 FDT 与 ramdisk，不使用栈，不写 BCB，不重启。正常启动或数据无效/不匹配时仍进入原 FD/Visor。此判断针对当前 nabu 命令行协议，不解析其他内核的 bootconfig。
+开机不执行 BCB 自动检测或热重启；菜单 Recovery 按钮仍保留写请求、标记和热重启流程。
 
-由此保留原厂电源＋音量上 Recovery 启动环境；原厂已为 `fastboot reboot recovery` 或 `adb reboot recovery` 准备相同环境时也可直接继续。用户已确认上一份候选的电源＋音量上入口有效；后续生成的镜像仍需核对实际启动结果。
+## Windows 与普通 EFI 条目
 
-按用户要求移除 DeepSeek 增加的菜单前 BCB 检查；开机不再读取 misc 请求并自动热重启。菜单中的 Recovery 按钮仍保留写入请求、标记与热重启流程。
+Android 配置 `nabu_action=android`，Windows 配置 `nabu_action=bds`。旧配置缺少这些键会进入普通 EFI 加载路径；升级时须检查实际 ESP 的 `boot.conf` 并替换配套 Android EFI，保留个人外观设置。
 
-## Windows 与 Linux
+Windows 的 BDS 动作退出 Visor 并继续原固件启动流程。配置中的 `kernel=...bootmgfw.efi` 用于展示/识别，不是该动作的实际 `LoadImage` 目标。固件默认启动项改变时，BDS 的启动结果也会改变。
 
-旧版 ESP 配置迁移时必须在实际 `boot.conf` 补齐 Android 的 `nabu_action=android` 与 Windows 的 `nabu_action=bds`。2026-10-11 实机读取发现缺少这两个键，且外部 Android EFI 为旧版本；这会选择普通 EFI 加载路径，绕过已验证的标记桥接与 Windows BDS。更新时保留用户外观设置。补齐配置、更新 EFI 并刷入去除开机 BCB 自检的新镜像后，用户确认一切正常。
+普通条目不设置 `nabu_action`，沿用上游 EFI 加载器。浏览器或快照明确覆盖内核/EFI 路径时，本次优先使用上游加载器，不修改保存的动作条目。加载失败进入上游错误恢复界面，文字操作需要 USB 键盘。Linux 的 ARM64 EFI 程序或 EFI Stub 内核可走普通路径，但兼容性需实际验证；三系统应配置独立的 Windows 与 Linux 入口。
 
-Windows 的动作条目 `nabu_action=bds` 干净退出 Visor，再执行原固件 BDS。配置中的 Windows 路径不作为这条动作的实际 LoadImage 目标。因此当前行为跟随固件正常默认启动流程。
+## 构建与发布
 
-普通条目不写 `nabu_action`，继续使用上游 Visor 的 EFI 加载器。Linux 的 ARM64 EFI 程序或 EFI Stub 内核可走这条路径，但本机兼容性还未验证。三系统需要独立核对 Windows 与 Linux 引导入口。
+`port/visor/NABU.patch` 只应用到 Visor 的临时副本。`port/recovery/overlay.py` 额外生成三个覆盖文件：
 
-## 构建覆盖与检查
+1. `src/visor_platform.c`：第三个电源按钮调用 Recovery 请求。
+2. `third_party/visor/src/gui/gui_panels.c`：显示 Recovery 标签，保留原图标。
+3. `third_party/visor/src/core/main.c`：请求失败显示原因并取消倒计时。
 
-`src/` 是基础平台层。构建先在临时目录复制它，并使用 `port/renegade/nabu_reset.zig` 替换副本中的 Android backend。`port/recovery/overlay.py` 只生成以下三个覆盖文件：
+构建校验上游源码、固件模块保留、原内核主体与 ramdisk 保留，以及打包后内核匹配。BCB 模拟存储检查覆盖修改范围、512/4096 字节块、对齐、失败恢复和标记调用顺序。
 
-1. `src/visor_platform.c`：第三按钮调用 Recovery 请求。
-2. `third_party/visor/src/gui/gui_panels.c`：标签为 Recovery，保留原图标。
-3. `third_party/visor/src/core/main.c`：请求失败显示原因并取消自动倒计时。
+全部成品和 ESP 资源先在临时目录生成并校验，再由 `build_publish.py` 发布。已有目录允许覆盖同名生成文件，无关文件保留。替换前文件备份到输出目录 `.build-backup/backup.zip`；`publication.json` 记录原路径。发布失败尝试恢复已替换文件，构建失败保留原成品。测试覆盖成功覆盖、准备失败及部分发布后的回滚。
 
-构建校验上游源码、固件模块保留、原内核主体和 ramdisk 保留，以及打包后内核匹配。模拟存储检查覆盖 BCB 修改范围、512/4096 字节块、对齐、失败恢复和调用标记程序的先后顺序。已有真机结果只适用于已交付镜像；新输入生成的镜像需要重新确认。
-
-输出目录可以存在，同名生成文件覆盖。临时构建目录每次重新创建，避免旧解包文件影响新构建。
-
-## 子模块与构建副本
-
-三个参与编译的依赖作为 Git 子模块固定版本。Visor 的完整 nabu 补丁在 `port/visor/NABU.patch`。构建复制 Visor 到临时目录，规范补丁目标的文本换行后应用补丁，再应用 Recovery 覆盖器；不修改子模块工作树。Renegade 原版程序直接从子模块读取，源码校验按规范 LF 字节计算 Git blob，另记录实际工作树 SHA256。
-
-首次克隆时，功能头文件与清单自动生成，默认外部资源从 Visor 子模块准备到 ESP 副本，配套 Android EFI 程序在构建中生成。编译器、原始输入、工具可执行文件及输出镜像不提交。
+三个依赖用子模块固定版本，工作树保持干净。首次构建自动生成功能头文件与清单，缺少的默认资源从 Visor 子模块准备到 ESP 副本，并生成 Android EFI。原始固件、工具安装和输出镜像不提交 Git。

@@ -17,8 +17,8 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-
 sys.dont_write_bytecode = True
+from build_publish import publish_files
 COMMIT = 'e1952621f419f8db60ed28271264e1b5184c571d'
 SOURCE_HASHES = {
     'Reboot2PayloadApp.c': '363f69fdcddd7534646126bc401aefded0efc9db',
@@ -134,10 +134,12 @@ def main():
         if actual != expected:
             raise SystemExit('Vendored upstream source changed: '+file)
         sources[file] = {'git_blob': actual, 'sha256': sha(data), 'worktree_sha256': sha(worktree_data)}
-    out.mkdir(parents=True, exist_ok=True)
     global _build_workspace
     _build_workspace = tempfile.TemporaryDirectory(prefix='nabu-visor-build-', ignore_cleanup_errors=True)
     work = Path(_build_workspace.name)
+    output_dir = out
+    out = work/'outputs'
+    out.mkdir()
     env = os.environ.copy()
     env['ZIG_GLOBAL_CACHE_DIR'] = str(work/'zig-cache/global')
     env['ZIG_LOCAL_CACHE_DIR'] = str(work/'zig-cache/local')
@@ -165,7 +167,10 @@ def main():
     run('git', 'init', '--quiet', cwd=visor)
     run('git', '-c', 'core.autocrlf=false', 'apply', '--check', '--whitespace=nowarn', patch, cwd=visor)
     run('git', '-c', 'core.autocrlf=false', 'apply', '--whitespace=nowarn', patch, cwd=visor)
-    esp = root/'esp/EFI/visor'
+    esp_tree = work/'esp'
+    if (root/'esp').is_dir():
+        shutil.copytree(root/'esp', esp_tree)
+    esp = esp_tree/'EFI/visor'
     esp.mkdir(parents=True, exist_ok=True)
     if not (esp/'boot.conf').exists():
         shutil.copy2(root/'config/boot.conf', esp/'boot.conf')
@@ -177,12 +182,8 @@ def main():
                 shutil.copy2(file, destination)
     if not (esp/'boot.conf.example').exists():
         shutil.copy2(root/'third_party/visor/boot.conf.example', esp/'boot.conf.example')
-    # Leave the normal build and source tree untouched; shadow only the backend.
-    shadow = work/'src'
-    shutil.copytree(root/'src', shadow)
-    shutil.copy2(port/'nabu_reset.zig', shadow/'nabu_reset.zig')
-    android = shadow/'android.zig'
-    android.write_text(android.read_text(encoding='utf-8').replace('_ = handle;', 'uefi.handle = handle;'), encoding='utf-8')
+    # Both EFI entries import the same canonical Renegade backend directly.
+    android = root/'src/android.zig'
     overlays, recovery_sources = {}, []
     if args.recovery_port:
         recovery_port = args.recovery_port.resolve()
@@ -214,7 +215,7 @@ def main():
     reset_sources = [source_paths['Reboot2PayloadApp.c'], port/'bridge.c']
     print('[1/4] Compile unchanged Renegade app + existing Visor menu', flush=True)
     driver = work/'NabuBootMenu.efi'
-    run(zig, 'build-exe', shadow/'menu.zig', '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
+    run(zig, 'build-exe', root/'src/menu.zig', '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
         '-fentry=EfiMain', '--subsystem', 'efi_boot_service_driver', '-femit-bin='+str(driver),
         '-cflags', *flags, '-I'+str(port/'compat'), '--',
         *menu_sources, *reset_sources, *recovery_sources)
@@ -222,7 +223,7 @@ def main():
     run(zig, 'build-exe', android, '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
         '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(app),
         '-cflags', *common, '--', *reset_sources)
-    shutil.copy2(app, root/'esp/EFI/visor/NabuAndroid.efi')
+    shutil.copy2(app, esp/'NabuAndroid.efi')
     print('[2/4] Keep all original firmware modules; add rebuilt menu only', flush=True)
     raw_fd = base_fd.read_bytes()
     fd, fd_info = fp.patch_fd(raw_fd, driver.read_bytes())
@@ -294,10 +295,9 @@ def main():
     shutil.copy2(app, out/app.name)
     archive = out/(args.output_prefix+'-esp.zip')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
-        for file in sorted((root/'esp').rglob('*')):
+        for file in sorted(esp_tree.rglob('*')):
             if file.is_file():
-                src = app if file.relative_to(root/'esp').as_posix() == 'EFI/visor/NabuAndroid.efi' else file
-                z.write(src, file.relative_to(root/'esp').as_posix())
+                z.write(file, file.relative_to(esp_tree).as_posix())
     manifest = {
         'device': 'xiaomi-nabu', 'status': 'CANDIDATE_NOT_HARDWARE_TESTED', 'hardware_tested': False,
         'upstream': {'repo': 'https://github.com/edk2-porting/edk2-msm', 'commit': COMMIT, 'sources': sources},
@@ -364,6 +364,17 @@ def main():
     (out/'SHA256SUMS.txt').write_text(''.join(sha(p.read_bytes())+'  '+p.name+'\n' for p in checksum_files), encoding='ascii')
     if old_release_sha is not None and baseline.resolve() != image_path.resolve() and sha(baseline.read_bytes()) != old_release_sha:
         raise ValueError('Existing release image changed')
+    replacements = [(file, output_dir/file.name) for file in out.iterdir() if file.is_file()]
+    for file in sorted(esp_tree.rglob('*')):
+        if file.is_file():
+            target = root/'esp'/file.relative_to(esp_tree)
+            if not target.is_file() or sha(file.read_bytes()) != sha(target.read_bytes()):
+                replacements.append((file, target))
+    inputs = {stock, base_fd}
+    if any(target.resolve() in inputs for _, target in replacements):
+        raise ValueError('Build outputs must not overwrite the input boot or FD')
+    backup = publish_files(replacements, output_dir/'.build-backup')
+    print('Published validated build. Previous files: '+str(backup), flush=True)
     print(json.dumps({k: manifest[k] for k in ('status','output_boot','output_fd','kernel')}, indent=2), flush=True)
 
 _build_workspace = None

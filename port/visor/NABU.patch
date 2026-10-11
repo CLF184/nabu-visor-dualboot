@@ -87,7 +87,6 @@ index 6fb4e13..e038fcf 100644
      entry->next = NULL;
      entry->deployments = NULL;
 diff --git a/src/core/main.c b/src/core/main.c
-index 886bc75..27b1e76 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
 @@ -15,6 +15,9 @@
@@ -100,7 +99,7 @@ index 886bc75..27b1e76 100644
  
  EFI_HANDLE IH;
  
-@@ -218,6 +221,12 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
+@@ -218,6 +221,12 @@
          gui_set_mode(&gui, config.res_w, config.res_h, config.res_max);
      }
  
@@ -113,7 +112,7 @@ index 886bc75..27b1e76 100644
      if (config.hotplug) {
          config_hotplug_arm(&config);
          efi_log(L"main: hotplug volume watch armed");
-@@ -520,6 +529,12 @@ select_entry:
+@@ -520,6 +529,12 @@
          return EFI_SUCCESS;
      }
      if (action == VISOR_ACTION_FIRMWARE) {
@@ -126,7 +125,7 @@ index 886bc75..27b1e76 100644
          if (!text_mode) {
              gui_fade_out(&gui);
              gui_shutdown(&gui);
-@@ -541,6 +556,7 @@ select_entry:
+@@ -541,6 +556,7 @@
          }
          RT->ResetSystem(EfiResetCold, EFI_SUCCESS, 0, NULL);
          return EFI_SUCCESS;
@@ -134,7 +133,7 @@ index 886bc75..27b1e76 100644
      }
  
      if (!selected) {
-@@ -757,6 +773,18 @@ boot_selected:
+@@ -757,6 +773,20 @@
       * usual close in gui_shutdown() stays the normal path. */
      cap_session_finish();
  
@@ -143,7 +142,9 @@ index 886bc75..27b1e76 100644
 +     * 由固件卷内的 Nabu 驱动接管：
 +     *   bds     -> 调用固件原始 BDS 入口（Windows 走原生启动流程）
 +     *   android -> 驱动写 DRAM 标记并热重启，内核入口分流代码回到 Android */
-+    if (selected->nabu_action != NABU_ACTION_NONE) {
++    /* A browsed EFI/kernel or snapshot kernel is an explicit one-shot target.
++     * Preserve the upstream loader for that target instead of the stored action. */
++    if (selected->nabu_action != NABU_ACTION_NONE && !kernel_overridden) {
 +        nabu_exit_action = selected->nabu_action;
 +        cleanup_status = EFI_SUCCESS;
 +        goto boot_cleanup_return;
@@ -153,22 +154,15 @@ index 886bc75..27b1e76 100644
      status = visor_boot(selected, ST);
  
      if (!visor_boot_services_active) {
-@@ -804,6 +832,14 @@ boot_selected:
+@@ -804,6 +834,7 @@
      efi_print(L"Boot failed - entering recovery\r\n");
      efi_fs_drivers_set_lazy(1);
  
-+#ifdef NABU_EMBEDDED
-+    /* nabu：启动失败不再进入需要键盘输入的恢复控制台（本机只有音量/电源两个键）。
-+     * 直接把控制权交回固件原始 BDS，保证设备始终还能源生启动 Windows，绝不卡死。 */
-+    nabu_exit_action = NABU_ACTION_BDS;
-+    cleanup_status = status;
-+    goto boot_cleanup_return;
-+#endif
 +
      action = text_recovery_run(&gui, selected, status, config.quiet);
  
      if (action == VISOR_ACTION_RETRY) {
-@@ -826,6 +862,10 @@ boot_selected:
+@@ -826,6 +857,10 @@
          return EFI_SUCCESS;
      }
      if (action == VISOR_ACTION_FIRMWARE) {
@@ -179,7 +173,7 @@ index 886bc75..27b1e76 100644
          efi_log(L"recovery: firmware setup requested");
          UINT64 osind = 0;
          UINTN  sz = sizeof(osind);
-@@ -836,6 +876,7 @@ boot_selected:
+@@ -836,6 +871,7 @@
                          EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS |
                          EFI_VARIABLE_RUNTIME_ACCESS,
                          sizeof(osind), &osind);
