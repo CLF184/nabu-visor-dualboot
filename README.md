@@ -4,7 +4,7 @@
 
 沿用 Visor 的外部配置、主题资源和完整 ARM64 功能清单。菜单嵌入 UEFI FD，配置与素材放在平板 ESP 的 `\EFI\visor\`。Android 使用 Renegade 标记配对启动，Windows 继续原固件 BDS 流程，Recovery 启动平板已有的 Recovery。
 
-此前交付镜像已验证 Android、Windows、Recovery 按钮与电源＋音量上入口。**最新构建已通过编译和镜像校验，尚未真机验证。** 每次构建的结果以 `dist/manifest.json` 为准；Linux 尚未在本机验证。
+支持在同一菜单中选择 Android、Windows 和 Linux。Android、Windows、Recovery 按钮与电源＋音量上入口此前已验证；Linux 的 rEFInd 适配已通过 `fastboot boot` 临时启动 Ubuntu。**最新关闭日志的镜像已通过构建检查，尚未实机测试；其他系统也未在本次镜像上重新回归。** 每次构建的结果以 `dist/manifest.json` 为准，不自动继承旧镜像的验证状态。
 
 ## 获取源码与准备依赖
 
@@ -99,6 +99,7 @@ fastboot reboot
 | --- | --- |
 | Android | 写入 128 个 `0x5241` 标记后热重启；内核入口清除标记并继续原内核 |
 | Windows | 退出菜单，交回 FD 原始 BDS 启动流程 |
+| Linux | 原版 rEFInd 加载该条目的 EFI/内核、initrd 和参数 |
 | Recovery | 向 `misc` 写入并核对 `boot-recovery` 请求，再使用同一套标记与热重启流程 |
 
 Recovery 按钮使用已有 Recovery 镜像。原厂 Recovery 入口识别针对当前 nabu 的 FDT 启动参数约定；完整适配和限制见 [实现说明](docs/IMPLEMENTATION.md)。
@@ -137,12 +138,65 @@ Windows 更新只替换 ESP 引导文件时，无需重新构建。要更新 boo
 
 菜单可以添加其他系统。普通条目不设置 `nabu_action`，沿用 Visor 的 EFI 加载流程，可配置 ARM64 EFI 引导程序或 EFI Stub 内核；Linux 的设备树/ACPI、参数和固件兼容性仍需实际验证。
 
-Windows 的 `nabu_action=bds` 跟随固件默认启动项。安装 Linux 若改变默认项，此条目也可能进入 Linux；三系统需配置不同的引导入口。
+三系统配置保留 Android 的 `nabu_action=android`、Windows 的 `nabu_action=bds`，并为每个 Linux 条目设置 `nabu_action=linux`。Windows 的 BDS 动作跟随固件默认启动项，因此安装 Linux 时应保留 Windows 为该默认目标；Linux 则通过下述独立 rEFInd 目录加载。
+
+## Linux：复用 Nabu rEFInd
+
+Linux 条目设置 `nabu_action=linux`，走 `Visor → 原版 Nabu rEFInd → 所选 Linux 引导文件`。可以配置多个发行版，或把目标设为 ARM64 GRUB/shim；发行版内核仍需适配 nabu。当前实现已通过构建、主机模拟检查和本机 Ubuntu 临时启动；其他发行版仍需实际验证。
+
+先按 [TheMojoMan/xiaomi-nabu](https://github.com/TheMojoMan/xiaomi-nabu) 准备 Linux 根分区和 EFI 文件，再准备项目配套 `efi.tar`。在本项目目录运行：
+
+```powershell
+py prepare_linux.py --efi-tar "E:\Download\efi.tar" --boot-conf "E:\backup\boot.conf" --kernel "\EFI\ubuntu\6.14.11.efi"
+```
+
+`--boot-conf` 指定平板实际配置的备份，保留个人背景及其他条目；省略时使用 `esp/EFI/visor/boot.conf`。`--entry-name` 默认 Ubuntu，指定其他名称可添加或更新其他 Linux 条目。输出在 `dist/linux-esp/`，也可用 `--out-dir` 指定；同名生成文件备份后覆盖。
+
+将输出的 `EFI/visor/refind/` 和 `EFI/visor/boot.conf` 复制到平板 ESP，并安装支持 `linux` 动作的新 boot 镜像。此动作需要更新一次 boot；之后修改发行版路径和参数无需重新编译或刷入。rEFInd 放在独立目录，保留原版程序、驱动、主题和 `refind.conf`，不覆盖 `EFI/BOOT`。
+
+```ini
+entry {
+    name=Ubuntu
+    icon=\EFI\visor\icons\ubuntu.png
+    kernel=\EFI\ubuntu\6.14.11.efi
+    nabu_action=linux
+}
+
+entry {
+    name=Other Linux
+    icon=\EFI\visor\icons\linux.png
+    kernel=\EFI\linux\vmlinuz.efi
+    initrd=\EFI\linux\initrd.img
+    cmdline=root=PARTLABEL=linux rw
+    nabu_action=linux
+}
+```
+
+有内置参数/ramdisk 的 UKI 通常不用额外设置 `cmdline`/`initrd`。其他分区可指定 Visor 原有的 `uuid`（GPT 分区 GUID）。每次选择后，适配层生成并回读核对 `EFI/visor/refind/nabu-selected.conf`，合并原 refind.conf 内容以保留一级主题 include，使用 rEFInd 原生 `volume/loader/initrd/options` 和立即自动启动；因此该目录需可写。更换发行版只改 `boot.conf` 中对应条目的路径和参数，不手改生成文件。
+
+这一动作适用于 rEFInd 可加载的普通 ARM64 EFI/EFI Stub/UKI 文件。Visor 的加密镜像容器、LUKS 辅助注入和 `sha256` 固定值无法直接转交给未修改的 rEFInd；带这些设置的 `linux` 动作会报错，不会忽略约束。需要这些 Visor 功能时保留普通条目（不设置动作），原有加载功能仍完整保留。文件浏览器或快照临时覆盖目标时也继续沿用原 Visor 加载器。
+
+Linux 交接补齐两个原 BDS 通常提供的条件：发送 EndOfDxe 通知；仅在实际 EFI 系统表缺少厂商字段时填入当前基础 FD 的原值并重算校验。这样保留 rEFInd 原版加载器、所有驱动和主题。若 rEFInd 返回，恢复所补字段。厂商值对应当前基础 FD 的 `Project Silicium`；更换其他来源的 FD 时须核对，详见 [实现说明](docs/IMPLEMENTATION.md)。
+
+Android、Windows、Recovery 的动作保持原样，Windows 继续原固件 BDS/Secure Boot 流程。Linux 接入不修改 Secure Boot 开关、证书或固件认证模块；若固件拒绝某 EFI，仍会报错，rEFInd 本身不是签名绕过工具。
+
+要把 rEFInd 资源包含在完整镜像配置包中，可生成到 `--out-dir .\esp` 后执行 `py build.py`。rEFInd 从输入的 `efi.tar` 复用，不参与菜单编译，不新增编译子模块。
+
+## 日志
+
+默认构建关闭三类文件日志：
+
+- Visor 文件日志：配置模板为 `file_log=0`，镜像也关闭文件记录，旧 ESP 配置不能重新开启。
+- Linux 交接日志：不再写入 `EFI/visor/refind/nabu-handoff.log`。
+- rEFInd 日志：每次选择 Linux 生成的主配置设置 `log_level 0`，覆盖基础 `refind.conf` 的日志级别。
+
+关闭日志保留 Linux 启动修复和原有启动错误提示。旧日志不会自动删除；生成镜像不会修改平板上的配置或文件。
 
 ## 目录
 
 ```text
 nabu-visor-dualboot/
+├─ prepare_linux.py         rEFInd Linux 配置与 ESP 包生成
 ├─ build.py                 构建入口
 ├─ image_builder.py         镜像与 ESP 包生成
 ├─ build_publish.py         成品发布、备份与失败回滚
@@ -158,8 +212,9 @@ nabu-visor-dualboot/
 ├─ port/visor/              Visor 补丁
 ├─ port/renegade/            标记程序的 ABI 桥接与兼容头文件
 ├─ port/recovery/            Recovery 请求、入口识别与构建覆盖器
+├─ port/refind/              外部 rEFInd 资源的许可说明
 ├─ third_party/             三个编译依赖子模块
-├─ tests/                   成品发布与回滚测试
+├─ tests/                   发布回滚、横屏绘制及 Linux 交接主机测试
 ├─ tools/                   本地编译器、补丁工具和原始输入
 ├─ build/                   自动生成的功能头文件与清单
 └─ dist/                    最新成品、校验值与最近一次备份
@@ -169,6 +224,7 @@ nabu-visor-dualboot/
 
 - [Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)，BSD-2-Clause；当前版本与补丁哈希见 `port/visor-upstream.json`。
 - [Renegade edk2-msm](https://github.com/edk2-porting/edk2-msm)，标记程序及 BootShim 循环来自固定版本子模块。
+- [rEFInd-nabu](https://github.com/rodriguezst/rEFInd-nabu)，Linux 中间加载器；外部文件从用户提供的 `efi.tar` 提取，不加入编译子模块。
 - [AOSP bootloader_message](https://android.googlesource.com/platform/bootable/recovery/+/refs/heads/main/bootloader_message/bootloader_message.cpp)，Recovery 请求格式。
 
 本项目适配和构建脚本采用 MIT 许可；上游代码及资源遵循各自许可，详见 [NOTICE.md](NOTICE.md)。

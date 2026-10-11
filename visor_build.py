@@ -41,7 +41,7 @@ def sources():
         units += ['stubs/' + s for s in reg.get('FEAT_' + f + '_STUB', '').split()]
     gnuefi = ['data.c', 'misc.c', 'str.c', 'dpath.c', 'print.c', 'va_print.c', 'guid.c', 'error.c', 'console.c', 'event.c',
               'runtime/rtstr.c', 'runtime/rtdata.c', 'runtime/vm.c', 'runtime/efirtlib.c', 'aarch64/math.c']
-    return (['src/visor_platform.c', 'src/visor_landscape.c', 'src/visor_efi_support.c', 'build/visor_manifest.c']
+    return (['src/visor_platform.c', 'src/visor_linux.c', 'src/visor_linux_trace.c', 'src/visor_linux_system.c', 'src/visor_landscape.c', 'src/visor_efi_support.c', 'build/visor_manifest.c']
             + [f'third_party/visor/src/{s}' for s in sorted(set(units))]
             + [f'third_party/gnu-efi/lib/{s}' for s in gnuefi])
 

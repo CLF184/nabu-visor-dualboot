@@ -18,3 +18,8 @@ __pycache__/
 
 # Last successful build backup (including custom output directories)
 .build-backup/
+
+# Optional rEFInd resources generated from the provided efi.tar
+/esp/EFI/visor/refind/
+/esp/linux-manifest.json
+/esp/nabu-linux-esp.zip

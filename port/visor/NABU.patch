@@ -8,13 +8,13 @@ index 9647da0..06e4f86 100644
 +#ifdef NABU_EMBEDDED
 +#include "nabu_visor.h"
 +#endif
- 
+
  int config_early_file_log_enabled(void) {
      int previous = efi_log_file_enabled();
 @@ -187,12 +190,28 @@ EFI_STATUS config_parse(config_t *config) {
      config->tail = NULL;
      config->entry_count = 0;
- 
+
      CHAR16 *buf = read_text_file(CONFIG_FILE);
      if (!buf) {
 +#ifdef NABU_EMBEDDED
@@ -38,7 +38,7 @@ index 9647da0..06e4f86 100644
          return st;
 +#endif
      }
- 
+
      UINTN max_lines = 1;
 diff --git a/src/config/config_entry.c b/src/config/config_entry.c
 index 6fb4e13..e038fcf 100644
@@ -49,10 +49,10 @@ index 6fb4e13..e038fcf 100644
      CHAR16 *luks_cmdline = NULL;
      CHAR16 *luks_preset = NULL;
 +    int nabu_action = 0;
- 
+
      int braced = 0;
      for (CHAR16 *h = lines[*idx]; *h; h++)
-@@ -144,6 +145,17 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
+@@ -144,6 +145,19 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
              } else if (efi_strcmp(key, L"initrd_encrypted") == 0) {
                  initrd_encrypted = (*value == '1' || *value == 't' || *value == 'y');
                  initrd_encrypted_set = 1;
@@ -64,13 +64,15 @@ index 6fb4e13..e038fcf 100644
 +                } else if (efi_strcmp(value, L"bds") == 0 ||
 +                           efi_strcmp(value, L"windows") == 0) {
 +                    nabu_action = 1;
++                } else if (efi_strcmp(value, L"linux") == 0) {
++                    nabu_action = 3;
 +                } else {
-+                    efi_log(L"WARN: invalid nabu_action (use android | bds)");
++                    efi_log(L"WARN: invalid nabu_action (use android | bds | linux)");
 +                }
              } else if (efi_strcmp(key, L"luks") == 0 ||
                         efi_strcmp(key, L"luks_password") == 0) {
                  luks = (*value == '1' || *value == 't' || *value == 'y');
-@@ -186,6 +198,7 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
+@@ -186,6 +200,7 @@ EFI_STATUS parse_entry(config_t *config, CHAR16 **lines, UINTN *idx,
              e->luks_key_path = luks_key_path;
              e->luks_cmdline = luks_cmdline;
              e->luks_preset = luks_preset;
@@ -78,7 +80,7 @@ index 6fb4e13..e038fcf 100644
              luks_key_path = NULL;
              luks_cmdline = NULL;
              luks_preset = NULL;
-@@ -290,6 +303,7 @@ boot_entry_t* config_add_entry(config_t *config,
+@@ -290,6 +305,7 @@ boot_entry_t* config_add_entry(config_t *config,
      entry->luks_cmdline = NULL;
      entry->luks_preset = NULL;
      entry->decrypt_password = NULL;
@@ -96,13 +98,13 @@ diff --git a/src/core/main.c b/src/core/main.c
 +#ifdef NABU_EMBEDDED
 +#include "nabu_visor.h"
 +#endif
- 
+
  EFI_HANDLE IH;
- 
+
 @@ -218,6 +221,12 @@
          gui_set_mode(&gui, config.res_w, config.res_h, config.res_max);
      }
- 
+
 +#ifdef NABU_EMBEDDED
 +    if(EFI_ERROR(nabu_gui_ready(&gui,text_mode))) {
 +        if(!text_mode)gui_shutdown(&gui);
@@ -131,12 +133,12 @@ diff --git a/src/core/main.c b/src/core/main.c
          return EFI_SUCCESS;
 +#endif
      }
- 
+
      if (!selected) {
-@@ -757,6 +773,20 @@
+@@ -757,6 +773,26 @@
       * usual close in gui_shutdown() stays the normal path. */
      cap_session_finish();
- 
+
 +#ifdef NABU_EMBEDDED
 +    /* nabu 动作条目：不由 Visor 加载任何镜像，记录动作后干净返回，
 +     * 由固件卷内的 Nabu 驱动接管：
@@ -144,25 +146,31 @@ diff --git a/src/core/main.c b/src/core/main.c
 +     *   android -> 驱动写 DRAM 标记并热重启，内核入口分流代码回到 Android */
 +    /* A browsed EFI/kernel or snapshot kernel is an explicit one-shot target.
 +     * Preserve the upstream loader for that target instead of the stored action. */
-+    if (selected->nabu_action != NABU_ACTION_NONE && !kernel_overridden) {
++    if ((selected->nabu_action == NABU_ACTION_ANDROID ||
++         selected->nabu_action == NABU_ACTION_BDS) && !kernel_overridden) {
 +        nabu_exit_action = selected->nabu_action;
 +        cleanup_status = EFI_SUCCESS;
 +        goto boot_cleanup_return;
 +    }
 +#endif
 +
++#ifdef NABU_EMBEDDED
++    if (selected->nabu_action == NABU_ACTION_LINUX && !kernel_overridden)
++        status = nabu_boot_linux(selected, ST);
++    else
++#endif
      status = visor_boot(selected, ST);
- 
+
      if (!visor_boot_services_active) {
-@@ -804,6 +834,7 @@
+@@ -804,6 +840,7 @@
      efi_print(L"Boot failed - entering recovery\r\n");
      efi_fs_drivers_set_lazy(1);
- 
+
 +
      action = text_recovery_run(&gui, selected, status, config.quiet);
- 
+
      if (action == VISOR_ACTION_RETRY) {
-@@ -826,6 +857,10 @@
+@@ -826,6 +863,10 @@
          return EFI_SUCCESS;
      }
      if (action == VISOR_ACTION_FIRMWARE) {
@@ -173,20 +181,19 @@ diff --git a/src/core/main.c b/src/core/main.c
          efi_log(L"recovery: firmware setup requested");
          UINT64 osind = 0;
          UINTN  sz = sizeof(osind);
-@@ -836,6 +871,7 @@
+@@ -836,6 +877,7 @@
                          EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS |
                          EFI_VARIABLE_RUNTIME_ACCESS,
                          sizeof(osind), &osind);
 +#endif
      }
- 
+
      efi_log(L"recovery: reboot requested");
 diff --git a/src/gui/gui.c b/src/gui/gui.c
-index a382296..eeba331 100644
 --- a/src/gui/gui.c
 +++ b/src/gui/gui.c
-@@ -99,6 +99,10 @@ void gui_present_band(gui_state_t *state, INTN y, INTN h) {
- 
+@@ -99,6 +99,10 @@
+
  static void gui_fb_set_wc(gui_state_t *state) {
      state->fb_fast = 0;
 +#ifdef NABU_EMBEDDED
@@ -196,10 +203,10 @@ index a382296..eeba331 100644
      if (!gui_has_linear_fb(state)) return;
      UINT64 base = (UINT64)state->gop->Mode->FrameBufferBase;
      UINT64 size = (UINT64)state->gop->Mode->FrameBufferSize;
-@@ -144,8 +148,16 @@ EFI_STATUS gui_init(gui_state_t *state) {
+@@ -144,8 +148,19 @@
          return EFI_NOT_FOUND;
      }
- 
+
 +#ifdef NABU_EMBEDDED
 +    if (!state->gop->Mode || !state->gop->Mode->Info) return EFI_UNSUPPORTED;
 +#endif
@@ -210,9 +217,12 @@ index a382296..eeba331 100644
 +        state->screen_height < 240 || state->screen_height > 4096)
 +        return EFI_UNSUPPORTED;
 +#endif
++#ifdef NABU_EMBEDDED
++    state->nabu_portrait_buffer = 0;
++#endif
      state->bpp = 32;
      state->pixel_format = state->gop->Mode->Info->PixelFormat;
- 
+
 diff --git a/src/gui/gui_image.c b/src/gui/gui_image.c
 index 94923f3..ab0ee99 100644
 --- a/src/gui/gui_image.c
@@ -220,12 +230,12 @@ index 94923f3..ab0ee99 100644
 @@ -105,7 +105,7 @@ icon_t* gui_load_image(CHAR16 *path) {
          for (UINTN x = 0; x < width; x++) {
              UINT8 *pixel = row + x * bytes_per_px;
- 
+
 -            icon->pixels[y * width + x] = (0xFF << 24) | (pixel[2] << 16) | (pixel[1] << 8) | pixel[0];
 +            icon->pixels[y * width + x] = (0xFFu << 24) | (pixel[2] << 16) | (pixel[1] << 8) | pixel[0];
          }
      }
- 
+
 diff --git a/src/gui/gui_panels.c b/src/gui/gui_panels.c
 index 0eb7d9a..6c3c7bc 100644
 --- a/src/gui/gui_panels.c
@@ -240,7 +250,7 @@ index 0eb7d9a..6c3c7bc 100644
      { L"Firmware", VISOR_ACTION_FIRMWARE },
 +#endif
  };
- 
+
  void layout_power(gui_state_t *state) {
 diff --git a/src/gui/gui_text.c b/src/gui/gui_text.c
 index 3358f54..005caa2 100644
@@ -249,7 +259,7 @@ index 3358f54..005caa2 100644
 @@ -6,6 +6,14 @@ static const font_t *g_font = &jetbrains_font;
  static const unsigned char *g_glyph_cov = 0;
  static const font_t        *g_cov_for   = 0;
- 
+
 +#ifdef NABU_EMBEDDED
 +void nabu_font_release(void) {
 +    if (g_glyph_cov) efi_free_pool((void*)g_glyph_cov);
@@ -268,7 +278,7 @@ index d28eb84..2375514 100644
 @@ -12,6 +12,7 @@
  #define VISOR_CRYPT_MAX_ITERATIONS 5000000U
  #define VISOR_CRYPT_HEADER_AUTH_SIZE 52
- 
+
 +#pragma pack(push, 1)
  typedef struct {
      UINT8  magic[8];
@@ -278,35 +288,70 @@ index d28eb84..2375514 100644
      UINT8  tag[VISOR_CRYPT_HASH_SIZE];
  } __attribute__((packed)) visor_crypt_header_t;
 +#pragma pack(pop)
- 
+
  EFI_STATUS visor_decrypt_buffer(const void *input, UINTN input_size,
                                  CHAR16 *password,
 diff --git a/src/include/gui.h b/src/include/gui.h
-index 15fe0b1..97b1339 100644
 --- a/src/include/gui.h
 +++ b/src/include/gui.h
-@@ -123,6 +123,8 @@ typedef struct boot_entry {
+@@ -123,6 +123,8 @@
      CHAR16 *uuid;
      UINTN index;
      int type;
-+    /* nabu 扩展：条目动作（0=普通条目, 1=交回固件 BDS, 2=写标记热重启进 Android） */
++    /* nabu 扩展：条目动作（0=普通条目, 1=交回固件 BDS, 2=写标记热重启进 Android, 3=rEFInd Linux） */
 +    int nabu_action;
      icon_t *icon;
      UINTN   icon_size;
      color_t color;
+@@ -165,6 +167,10 @@
+     int fb_fast;
+
+     UINT32 *backbuffer;
++#ifdef NABU_EMBEDDED
++    /* Logical coordinates stay landscape; storage can follow physical GOP. */
++    int nabu_portrait_buffer;
++#endif
+
+     boot_entry_t *entries;
+     UINTN entry_count;
 diff --git a/src/include/gui_internal.h b/src/include/gui_internal.h
-index ed0310d..9fd675f 100644
 --- a/src/include/gui_internal.h
 +++ b/src/include/gui_internal.h
-@@ -27,7 +27,7 @@ static inline UINTN isqrt_(UINTN n) {
+@@ -27,7 +27,7 @@
  }
- 
+
  static inline UINT32 color_to_u32(color_t c) {
 -    return (0xFF << 24) | (c.r << 16) | (c.g << 8) | c.b;
 +    return (0xFFu << 24) | (c.r << 16) | (c.g << 8) | c.b;
  }
- 
+
  static inline UINTN clamp_uintn(UINTN v, UINTN lo, UINTN hi) {
+@@ -94,10 +94,24 @@
+            ((UINT32)p[2] << 16) | ((UINT32)p[3] << 24);
+ }
+
++#ifdef NABU_EMBEDDED
++int nabu_draw_anim_background(gui_state_t *state, const UINT32 *pixels,
++    const UINTN *xmap, const UINTN *ymap, const UINT8 *dim, UINT32 fill);
++EFI_STATUS nabu_make_logical_buffer(gui_state_t *state);
++#endif
++
++static inline UINTN gui_pixel_offset(gui_state_t *state, UINTN x, UINTN y) {
++#ifdef NABU_EMBEDDED
++    if (state->nabu_portrait_buffer)
++        return x * state->screen_height + state->screen_height - 1 - y;
++#endif
++    return y * state->screen_width + x;
++}
++
+ static inline UINT32* get_pixel(gui_state_t *state, UINTN x, UINTN y) {
+     if (x >= state->screen_width || y >= state->screen_height || !state->backbuffer)
+         return NULL;
+-    return &state->backbuffer[y * state->screen_width + x];
++    return &state->backbuffer[gui_pixel_offset(state, x, y)];
+ }
+ #define FADE_MIN_FRAME_US         1500
+ int gui_animation_on(gui_state_t *state);
 diff --git a/src/include/linux_boot.h b/src/include/linux_boot.h
 index cd05e6b..c7bb545 100644
 --- a/src/include/linux_boot.h
@@ -314,7 +359,7 @@ index cd05e6b..c7bb545 100644
 @@ -10,6 +10,7 @@ typedef struct {
      UINT32 entry;
  } setup_header_32_t;
- 
+
 +#pragma pack(push, 1)
  typedef struct {
      UINT8  setup_sects;
@@ -324,7 +369,7 @@ index cd05e6b..c7bb545 100644
      UINT16 checksum;
  } __attribute__((packed)) setup_block_t;
 +#pragma pack(pop)
- 
+
  #define LINUX_SIGNATURE 0x53726448
  #define LINUX_SETUP_HEADER_OFFSET 0x1F1u
 diff --git a/src/security/tcg2.c b/src/security/tcg2.c
@@ -334,7 +379,7 @@ index 47eee0c..b5ad0cc 100644
 @@ -34,6 +34,7 @@ typedef struct {
      UINT32         ActivePcrBanks;
  } tcg2_capability_t;
- 
+
 +#pragma pack(push, 1)
  typedef struct {
      UINT32 HeaderSize;
@@ -344,6 +389,262 @@ index 47eee0c..b5ad0cc 100644
      UINT8  Event[1];
  } __attribute__((packed)) tcg2_tagged_event_t;
 +#pragma pack(pop)
- 
+
  #define TCG2_EVENT_HDR_BYTES  18
  #define TCG2_TAGGED_HDR_BYTES  8
+diff --git a/src/gui/gui_background.c b/src/gui/gui_background.c
+--- a/src/gui/gui_background.c
++++ b/src/gui/gui_background.c
+@@ -136,6 +136,10 @@
+         UINT32 *src = a->canvas;
+         UINT32 *dst = state->backbuffer;
+         UINT32 fill = dim_pixel(color_to_u32(state->bg_color));
++#ifdef NABU_EMBEDDED
++        if (nabu_draw_anim_background(state, src, a->xmap, a->ymap,
++                                      g_dim195, fill)) return 1;
++#endif
+
+         for (UINTN y = 0; y < dst_height; y++) {
+             UINTN rowbase = a->ymap[y];
+diff --git a/src/gui/gui_blur.c b/src/gui/gui_blur.c
+--- a/src/gui/gui_blur.c
++++ b/src/gui/gui_blur.c
+@@ -98,9 +98,8 @@
+             UINTN cols = x1 - x0;
+             UINT32 ar = 0, ag = 0, ab = 0;
+             for (UINTN y = y0; y < y1; y++) {
+-                const UINT32 *s = src + y * W + x0;
+                 for (UINTN k = 0; k < cols; k++) {
+-                    UINT32 p = s[k];
++                    UINT32 p = src[gui_pixel_offset(state, x0 + k, y)];
+                     ar += (p >> 16) & 0xFF; ag += (p >> 8) & 0xFF; ab += p & 0xFF;
+                 }
+             }
+diff --git a/src/gui/gui_capture.c b/src/gui/gui_capture.c
+--- a/src/gui/gui_capture.c
++++ b/src/gui/gui_capture.c
+@@ -61,6 +61,12 @@
+
+ void cap_do_screenshot(gui_state_t *state) {
+     if (!state->backbuffer || !state->screen_width || !state->screen_height) return;
++#ifdef NABU_EMBEDDED
++    if (EFI_ERROR(nabu_make_logical_buffer(state))) {
++        cap_set_toast(state, L"Screenshot failed", L"Out of memory", 1);
++        return;
++    }
++#endif
+     UINT8 *png = NULL; UINTN pngsz = 0;
+     EFI_STATUS st = cap_png_encode(state->backbuffer, state->screen_width,
+                                    state->screen_height, &png, &pngsz);
+@@ -86,6 +92,12 @@
+
+ void cap_start_record(gui_state_t *state) {
+     if (!state->backbuffer || !state->screen_width || !state->screen_height) return;
++#ifdef NABU_EMBEDDED
++    if (EFI_ERROR(nabu_make_logical_buffer(state))) {
++        cap_set_toast(state, L"Cannot start recording", L"Out of memory", 1);
++        return;
++    }
++#endif
+     state->cap_mode = 2;
+     state->cap_start_ms = efi_get_tick();
+     state->cap_frames = 0;
+diff --git a/src/gui/gui_card.c b/src/gui/gui_card.c
+--- a/src/gui/gui_card.c
++++ b/src/gui/gui_card.c
+@@ -5,6 +5,18 @@
+     if (!state->scene_cache) return;
+     if (y < 0) { h += y; y = 0; }
+     if (y + h > (INTN)state->screen_height) h = (INTN)state->screen_height - y;
++#ifdef NABU_EMBEDDED
++    if (state->nabu_portrait_buffer) {
++        if (h <= 0 || !state->backbuffer) return;
++        UINTN H = state->screen_height;
++        for (UINTN x = 0; x < state->screen_width; x++) {
++            UINTN off = x * H + H - (UINTN)(y + h);
++            CopyMem(state->backbuffer + off, state->scene_cache + off,
++                    (UINTN)h * sizeof(UINT32));
++        }
++        return;
++    }
++#endif
+     UINTN W = state->screen_width;
+     for (INTN row = y; row < y + h; row++) {
+         UINT32 *d = state->backbuffer + (UINTN)row * W;
+diff --git a/src/gui/gui_intro.c b/src/gui/gui_intro.c
+--- a/src/gui/gui_intro.c
++++ b/src/gui/gui_intro.c
+@@ -73,13 +73,12 @@
+     if (!bb) return;
+
+     for (UINTN y = 0; y < fit->top; y++)
+-        for (UINTN x = 0; x < sw; x++) bb[y * sw + x] = 0xFF000000u;
++        for (UINTN x = 0; x < sw; x++) *get_pixel(state, x, y) = 0xFF000000u;
+     for (UINTN y = fit->top + fit->height; y < sh; y++)
+-        for (UINTN x = 0; x < sw; x++) bb[y * sw + x] = 0xFF000000u;
++        for (UINTN x = 0; x < sw; x++) *get_pixel(state, x, y) = 0xFF000000u;
+     for (UINTN y = fit->top; y < fit->top + fit->height; y++) {
+-        UINT32 *row = bb + y * sw;
+-        for (UINTN x = 0; x < fit->left; x++) row[x] = 0xFF000000u;
+-        for (UINTN x = fit->left + fit->width; x < sw; x++) row[x] = 0xFF000000u;
++        for (UINTN x = 0; x < fit->left; x++) *get_pixel(state, x, y) = 0xFF000000u;
++        for (UINTN x = fit->left + fit->width; x < sw; x++) *get_pixel(state, x, y) = 0xFF000000u;
+     }
+ }
+
+@@ -144,17 +143,16 @@
+     for (UINTN row = 0; row < fit->height; row++) {
+         UINTN srow = (UINTN)((UINT64)row * ih / fit->height);
+         const UINT32 *s = src + srow * iw;
+-        UINT32 *d = state->backbuffer + (fit->top + row) * sw + fit->left;
+         if (alpha >= 255) {
+             for (UINTN x = 0; x < fit->width; x++) {
+                 UINT32 p = s[fit->xmap[x]];
+-                d[x] = (p & 0x00FFFFFF) | 0xFF000000u;
++                *get_pixel(state, fit->left + x, fit->top + row) = (p & 0x00FFFFFF) | 0xFF000000u;
+             }
+         } else if (*opaque) {
+             for (UINTN x = 0; x < fit->width; x++) {
+                 UINT32 p = s[fit->xmap[x]];
+                 if (!(p >> 24)) *opaque = 0;
+-                d[x] = 0xFF000000u
++                *get_pixel(state, fit->left + x, fit->top + row) = 0xFF000000u
+                      | ((UINT32)intro_scale[(p >> 16) & 255] << 16)
+                      | ((UINT32)intro_scale[(p >> 8) & 255] << 8)
+                      | (UINT32)intro_scale[p & 255];
+@@ -168,7 +166,7 @@
+                 UINT32 r = (UINT32)((UINTN)((p >> 16) & 255) * a / 255);
+                 UINT32 g = (UINT32)((UINTN)((p >> 8) & 255) * a / 255);
+                 UINT32 b = (UINT32)((UINTN)(p & 255) * a / 255);
+-                d[x] = 0xFF000000u | (r << 16) | (g << 8) | b;
++                *get_pixel(state, fit->left + x, fit->top + row) = 0xFF000000u | (r << 16) | (g << 8) | b;
+             }
+         }
+     }
+diff --git a/src/boot/linux_boot.c b/src/boot/linux_boot.c
+--- a/src/boot/linux_boot.c
++++ b/src/boot/linux_boot.c
+@@ -1,5 +1,15 @@
+ /* linux_boot.c - the boot handover: verify, register initrd, StartImage */
+ #include "linux_internal.h"
++#ifdef NABU_EMBEDDED
++#include "nabu_visor.h"
++#define NABU_LOAD_IMAGE(...) nabu_linux_load_image(BS, __VA_ARGS__)
++#define NABU_START_IMAGE(...) nabu_linux_start_image(BS, __VA_ARGS__)
++#define NABU_TRACE(stage, status) nabu_linux_trace(stage, status)
++#else
++#define NABU_LOAD_IMAGE(...) BS->LoadImage(__VA_ARGS__)
++#define NABU_START_IMAGE(...) BS->StartImage(__VA_ARGS__)
++#define NABU_TRACE(stage, status) ((void)0)
++#endif
+
+ static int linux_is_pe_image(const UINT8 *data, UINTN size) {
+     if (!data || size < 0x40 || data[0] != 'M' || data[1] != 'Z') return 0;
+@@ -30,7 +40,7 @@
+             return EFI_NOT_FOUND;
+         }
+         EFI_HANDLE bh;
+-        status = BS->LoadImage(FALSE, IH, bootmgr_dp, NULL, 0, &bh);
++        status = NABU_LOAD_IMAGE(FALSE, IH, bootmgr_dp, NULL, 0, &bh);
+         efi_free_pool(bootmgr_dp);
+         if (EFI_ERROR(status)) {
+             { CHAR16 m[96]; SPrint(m, sizeof(m),
+@@ -43,7 +53,7 @@
+         }
+         efi_log(L"boot: StartImage() - handing control to Windows Boot Manager");
+         efi_log_close();
+-        return BS->StartImage(bh, NULL, NULL);
++        return NABU_START_IMAGE(bh, NULL, NULL);
+     }
+
+     efi_log(L"boot: loading kernel/image file");
+@@ -65,6 +75,7 @@
+         clear_entry_password(entry);
+         return EFI_NOT_FOUND;
+     }
++    NABU_TRACE("image.read", EFI_SUCCESS);
+     void *kernel_data = kernel_buf->data;
+     kernel_size = kernel_buf->size;
+
+@@ -77,6 +88,7 @@
+
+     int sb = efi_secure_boot_enabled();
+     int shim = efi_shim_verify(kernel_data, kernel_size);
++    NABU_TRACE("shim.result.plus1", (EFI_STATUS)(shim + 1));
+     if (shim == 0) {
+         efi_log(L"ERROR: SHIM_LOCK verification failed - refusing to boot image");
+         efi_print(L"Secure Boot: image verification failed\r\n");
+@@ -153,7 +165,7 @@
+         if (kernel_dp) {
+
+             efi_log(L"boot: LoadImage() from the copy already in memory");
+-            status = BS->LoadImage(FALSE, IH, kernel_dp, kernel_data, kernel_size,
++            status = NABU_LOAD_IMAGE(FALSE, IH, kernel_dp, kernel_data, kernel_size,
+                                    &kernel_handle);
+             if (EFI_ERROR(status) && status != EFI_SECURITY_VIOLATION &&
+                 status != EFI_ACCESS_DENIED && dp_may_be_reread) {
+@@ -164,7 +176,7 @@
+                        L"letting the firmware read the file",
+                        (long)status);
+                 efi_log(m);
+-                status = BS->LoadImage(FALSE, IH, kernel_dp, NULL, 0, &kernel_handle);
++                status = NABU_LOAD_IMAGE(FALSE, IH, kernel_dp, NULL, 0, &kernel_handle);
+             }
+             efi_free_pool(kernel_dp);
+             if (EFI_ERROR(status) && status != EFI_SECURITY_VIOLATION &&
+@@ -175,12 +187,12 @@
+                        L"WARN: LoadImage(devpath) failed (status=0x%lx) - retrying from buffer",
+                        (long)status);
+                 efi_log(m);
+-                status = BS->LoadImage(FALSE, IH, NULL, kernel_data, kernel_size,
++                status = NABU_LOAD_IMAGE(FALSE, IH, NULL, kernel_data, kernel_size,
+                                        &kernel_handle);
+             }
+         } else {
+             efi_log(L"WARN: could not build device path - loading from source buffer");
+-            status = BS->LoadImage(FALSE, IH, NULL, kernel_data, kernel_size, &kernel_handle);
++            status = NABU_LOAD_IMAGE(FALSE, IH, NULL, kernel_data, kernel_size, &kernel_handle);
+         }
+         if (EFI_ERROR(status)) {
+             { CHAR16 m[96]; SPrint(m, sizeof(m),
+@@ -212,6 +224,7 @@
+         if (boot_cmdline) {
+             EFI_LOADED_IMAGE *loaded;
+             status = BS->HandleProtocol(kernel_handle, &gEfiLoadedImageProtocolGuid, (void**)&loaded);
++            NABU_TRACE("LoadedImage.protocol", status);
+             if (!EFI_ERROR(status)) {
+                 loaded->LoadOptions     = boot_cmdline;
+                 loaded->LoadOptionsSize = (UINT32)((efi_strlen16(boot_cmdline) + 1) * sizeof(CHAR16));
+@@ -305,7 +318,7 @@
+         efi_log(L"linux: StartImage() - handing control to kernel stub");
+         efi_log_close();
+         clear_entry_password(entry);
+-        status = BS->StartImage(kernel_handle, NULL, NULL);
++        status = NABU_START_IMAGE(kernel_handle, NULL, NULL);
+
+         { CHAR16 m[80]; SPrint(m, sizeof(m), L"linux: StartImage returned 0x%lx", (long)status);
+           efi_log(m); }
+diff --git a/src/core/efi_log.c b/src/core/efi_log.c
+--- a/src/core/efi_log.c
++++ b/src/core/efi_log.c
+@@ -4,12 +4,20 @@
+ int visor_quiet = 0;
+ int visor_log_to_console = 0;
+ int visor_boot_services_active = 1;
++#if defined(NABU_EMBEDDED) && !NABU_FILE_LOG
++static int visor_log_to_file = 0;
++#else
+ static int visor_log_to_file = 1;
++#endif
+
+ void efi_log_set_console(int enabled) {
+     visor_log_to_console = enabled ? 1 : 0;
+ }
+
+ void efi_log_set_file(int enabled) {
++#if defined(NABU_EMBEDDED) && !NABU_FILE_LOG
++    /* User requested a no-log image, including when an old ESP config remains. */
++    enabled = 0;
++#endif
+     visor_log_to_file = enabled ? 1 : 0;
+ }

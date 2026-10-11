@@ -10,6 +10,12 @@ Visor 编译为 AArch64 DXE 驱动 `NabuBootMenu.efi`，插入基础 FD，挂接
 
 横屏、音量键切换系统及电源动作、电源键松开确认是 nabu 适配。默认首次 5 秒无输入自动启动 Android，输入后取消本次倒计时。功能启用范围仅遵循上游 ARM64 架构和依赖限制。
 
+横屏绘制使用 `src/visor_landscape.c` 与 `port/visor/NABU.patch` 中的坐标访问钩子。界面尺寸、菜单与触摸坐标仍是横屏；绘图缓冲区按物理屏幕顺序存储。视频背景沿用上游解码画布、最近邻缩放映射、透明像素规则与调暗色表，在一次绘制中写入旋转后的位置；相邻输出像素取自同一源像素时复用结果。提交画面只复制对应区域，不再转置整屏。图标、文字、模糊、开场画面及局部缓存恢复使用同一坐标映射，淡入淡出与全屏缓存复制保留原流程。
+
+物理 GOP 提供有效的 RGB/BGR 32 位线性显存、容量与行跨度匹配，并且 CPU Architectural Protocol 的缓存同步可用时，直接提交并同步更新范围；不满足条件或缓存同步失败时使用原固件 GOP Blt，已按物理顺序绘制的画面仍无需再旋转。截图或交互录屏按需把当前画面与有效场景缓存转回横屏行序，本次菜单会话随后沿用原行序路径；启动全过程录屏启用时从一开始使用原行序路径。截图、录屏格式及视频解码、帧调度、配置和启动逻辑保持原样。
+
+`tests/test_landscape.c` 使用主机模拟 GOP 与缓存接口，检查合并绘制与原缩放/调色规则的像素一致性、透明像素、重复映射与分块边界、非对齐局部刷新、行填充、RGB/BGR 色序、截图缓存转回、越界请求及缓存失败回退。新镜像的实际播放流畅度仍需真机确认；源码路径优化不等同于已经达到指定帧率。
+
 ## Android 标记配对
 
 Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。构建直接读取子模块中的 `Reboot2PayloadApp.c` 并校验 Git blob。
@@ -53,6 +59,18 @@ Windows 的 BDS 动作退出 Visor 并继续原固件启动流程。配置中的
 
 普通条目不设置 `nabu_action`，沿用上游 EFI 加载器。浏览器或快照明确覆盖内核/EFI 路径时，本次优先使用上游加载器，不修改保存的动作条目。加载失败进入上游错误恢复界面，文字操作需要 USB 键盘。Linux 的 ARM64 EFI 程序或 EFI Stub 内核可走普通路径，但兼容性需实际验证；三系统应配置独立的 Windows 与 Linux 入口。
 
+### Linux rEFInd 接入
+
+新增 `NABU_ACTION_LINUX=3` / `nabu_action=linux`。Android、BDS 动作仍退出菜单交给原驱动；Linux 在原启动位置调用 `src/visor_linux.c`，失败继续上游错误恢复。浏览器/快照临时覆盖路径仍优先原加载器。
+
+适配层找到外部 `EFI/visor/refind/bootaa64.efi`，定位实际内核分区并检查内核和可选 initrd；不同卷以 GPT 分区 GUID 写入 rEFInd 原生 volume 字段。生成 UTF-16 LE 配置 `nabu-selected.conf`，将原 refind.conf 的文本并入生成的主配置，保留主题 include 的一级关系，再覆盖为手动单条目立即启动。参数内引号遵循 rEFInd 的双引号转义；拒绝控制字符与过长配置。每次清除旧文件、写入、Flush、回读核对和关闭所有句柄后，调用原 Visor EFI 加载器，以固定分区句柄加载 rEFInd，LoadOptions 为 `refind -c nabu-selected.conf`。目标的参数/initrd 不会误传给 rEFInd 本身。
+
+原版 rEFInd 无法处理 Visor 加密容器、LUKS 辅助注入和 hash pin；Linux 动作检测到这些设置会明确拒绝，不丢弃安全约束。普通 Visor 加载路径完整保留。`tests/test_linux.c` 使用主机文件系统模拟，覆盖跨分区、换系统、引号/中文参数、清除旧字段、写保护/短写/Flush/回读失败与句柄释放。
+
+`prepare_linux.py` 从用户提供的 TheMojoMan efi.tar 提取完整 rEFInd 文件到独立目录，保留原版资源内容；仅修改指定 boot.conf 条目的 kernel/action，保留 cmdline/initrd、其他条目和外观。发布沿用备份与回滚工具。来源、原版二进制哈希和文件哈希写入 linux-manifest.json，许可证见 port/refind/LICENSE.txt。
+
+不更换原 FD 驱动，仅 Linux 动作发送原 BDS 使用的 EndOfDxe 通知，不改 Secure Boot 变量、信任库或认证处理。仅在 FD 新菜单驱动中增加 Linux 动作，因此首次部署需要更新 boot。该链路仍不同于完整原 BDS→rEFInd 链路；当前两项阶段/系统表适配已在本机临时启动 Ubuntu 成功。
+
 ## 构建与发布
 
 `port/visor/NABU.patch` 只应用到 Visor 的临时副本。`port/recovery/overlay.py` 额外生成三个覆盖文件：
@@ -66,3 +84,13 @@ Windows 的 BDS 动作退出 Visor 并继续原固件启动流程。配置中的
 全部成品和 ESP 资源先在临时目录生成并校验，再由 `build_publish.py` 发布。已有目录允许覆盖同名生成文件，无关文件保留。替换前文件备份到输出目录 `.build-backup/backup.zip`；`publication.json` 记录原路径。发布失败尝试恢复已替换文件，构建失败保留原成品。测试覆盖成功覆盖、准备失败及部分发布后的回滚。
 
 三个依赖用子模块固定版本，工作树保持干净。首次构建自动生成功能头文件与清单，缺少的默认资源从 Visor 子模块准备到 ESP 副本，并生成 Android EFI。原始固件、工具安装和输出镜像不提交 Git。
+
+### Linux 交接记录
+
+用户要求关闭日志后，默认 `NABU_LINUX_TRACE=0`，不会打开、删除或写入交接日志，也不执行诊断变量读取；Linux 激活状态独立保留，确保系统表适配继续执行。生成的 rEFInd 主配置设置原生 `log_level 0`，Visor 配置设置 `file_log=0`。以下记录机制仅用于显式开启诊断时：Linux 动作在实际 rEFInd 所在 ESP 生成 `EFI/visor/refind/nabu-handoff.log`。每次尝试先删除旧记录，然后记录配置核对完成、镜像读取、固件 LoadImage/StartImage 前后及返回码；SecureBoot/SetupMode 仅读取。每行写入后 Flush 并关闭全部文件句柄，EFI 调用的参数、返回值、重试条件和认证处理保持上游原样。未选择 Linux 时记录不启用，写入失败不阻止原启动流程。最后一行只能定位已到达的阶段，不能证明下一阶段成功。rEFInd 自身仍使用原版日志。
+
+经用户确认，Linux 交接在配置核对、释放句柄后，按原 BDS 的 `EfiEventGroupSignal` 方式发送 EndOfDxe 通知，再调用原 EFI 加载器。当前 FD 的 SecurityStubDxe 在该通知到达前会延迟外部镜像并返回 EFI_ACCESS_DENIED；真机记录已确认 rEFInd 未进入 StartImage。通知失败时返回原恢复界面，不绕过 LoadImage，不修改认证处理或安全启动变量。该候选只补齐 Linux 需要的阶段，仍未替代完整 BDS 初始化，当前后续系统表适配候选已临时启动 Ubuntu 成功，其他 Linux 目标兼容性须真机验证。
+
+Linux 的原版 rEFInd 在 `UninitRefitLib` 中无条件比较 `ST->FirmwareVendor`。当前 FD 的原 BDS 才填写厂商字段；提前交接时为 NULL，已通过日志及二进制确认空指针风险。经用户确认，Linux 在 StartImage 前读取实际 LoadedImage.SystemTable，仅当厂商为空时用 RuntimeServicesData 补齐当前基础 FD 的原值 `Project Silicium`，版本为零时补 `0x10000`，并重算表 CRC。非空字段不覆盖，若 rEFInd 返回则恢复字段并重算当前表 CRC、释放内存；避免把子程序新增的配置表误还原。rEFInd 和驱动文件未修改，Secure Boot 变量及证书不变。此值匹配当前随附基础 FD，采用其他厂商 FD 时须重新核对元数据。
+
+用户要求只生成关闭日志的镜像、暂不操作平板。Nabu 构建默认 `NABU_FILE_LOG=0`，Visor 的文件日志初始值和 setter 均关闭，旧 ESP 的日志配置不会恢复磁盘写入。正常上游构建不受此条件影响；开发诊断构建可显式启用该编译开关。rEFInd 的生成配置追加 `log_level 0`，覆盖 ESP 上先前开启的调试级别；不修改其程序和外部主题。平板上的旧日志与配置未删除或改写。

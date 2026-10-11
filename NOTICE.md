@@ -9,3 +9,5 @@ Upstream code and derivative patch portions retain their upstream licenses:
 - DualBootKernelPatcher: the provided nabu config/entry bytes originate from the previously used DuoWOA/WOA-msmnile toolchain. See https://github.com/Project-Aloha/DualBootKernelPatcher and its upstream licensing. Executables are not distributed by this repository.
 
 Upstream assets are read from the pinned Visor submodule and generated into the local ESP package. Firmware input images, tool executables and compiled output images are not published in this source repository.
+
+Optional Linux ESP packages reuse rEFInd-nabu binaries/resources from the user-supplied TheMojoMan/xiaomi-nabu efi.tar. rEFInd/rEFIt notices are in port/refind/LICENSE.txt; bundled filesystem drivers and themes retain their own licenses. Source: https://github.com/rodriguezst/rEFInd-nabu. Binary assets are not committed to this source repository.

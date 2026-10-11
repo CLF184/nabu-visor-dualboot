@@ -356,6 +356,21 @@ def main():
             'The provided TWRP file is not embedded or flashed; the installed Recovery is used.',
             'No old Qualcomm reset driver, direct Linux loader or extra SimpleInit menu.',
         ]
+    manifest['linux_protocol'] = {
+        'action': 'nabu_action=linux', 'loader': r'\EFI\visor\refind\bootaa64.efi',
+        'config': r'\EFI\visor\refind\nabu-selected.conf',
+        'adapter_sha256': sha((root/'src/visor_linux.c').read_bytes()),
+        'stage': 'Linux-only EndOfDxe notification before original LoadImage',
+        'trace': r'\EFI\visor\refind\nabu-handoff.log',
+        'trace_enabled': False, 'refind_log_level': 0, 'visor_file_log_enabled': False,
+        'trace_sha256': sha((root/'src/visor_linux_trace.c').read_bytes()),
+        'system_table': 'fill missing Project Silicium vendor/revision, recalculate CRC; restore on return',
+        'system_table_sha256': sha((root/'src/visor_linux_system.c').read_bytes()),
+        'secure_boot_policy_changed': False, 'hardware_tested': False,
+    }
+    refind_binary = esp/'refind/bootaa64.efi'
+    if refind_binary.is_file():
+        manifest['linux_protocol']['refind_sha256'] = sha(refind_binary.read_bytes())
     visor_record = root/'port/visor-upstream.json'
     if visor_record.exists():
         manifest['visor_upstream'] = json.loads(visor_record.read_text(encoding='utf-8'))
