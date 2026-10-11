@@ -59,10 +59,6 @@ py build.py --boot "E:\path\original-android-boot.img" --fd "E:\path\new-nabu.fd
 
 查看所有参数：`py build.py --help`。
 
-### `py -3 -X utf8` 的含义
-
-`py` 是 Windows Python 启动器，`-3` 明确选择 Python 3，`-X utf8` 启用 UTF-8 模式以减少中文路径和输出乱码。完整写法是 `py -3 -X utf8 build.py`；本项目也可直接运行 `py build.py`，脚本会为子构建程序启用 UTF-8。
-
 ### 成品
 
 | 文件 | 用途 |
