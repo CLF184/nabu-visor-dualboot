@@ -224,15 +224,26 @@ def main():
         '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(app),
         '-cflags', *common, '--', *reset_sources)
     shutil.copy2(app, esp/'NabuAndroid.efi')
-    print('[2/4] Keep all original firmware modules; add rebuilt menu only', flush=True)
+    slot_builder = load(root/'boot_slot_build.py', 'boot_slot_build_candidate')
+    slot_driver, slot_record = slot_builder.build(root, work, run, zig)
+    print('[2/4] Keep original firmware modules; add menu and upstream BootSlotDxe', flush=True)
     raw_fd = base_fd.read_bytes()
-    fd, fd_info = fp.patch_fd(raw_fd, driver.read_bytes())
-    before, after = inventory(fp, raw_fd), inventory(fp, fd)
-    if set(after)-set(before) != {fp.DRIVER_GUID}:
+    before = inventory(fp, raw_fd)
+    existing_slot = fp.inspect_fd(raw_fd)['boot_slot_drivers']
+    if existing_slot > 1:
+        raise ValueError('Input FD contains multiple BootSlotDxe modules')
+    fd, fd_info = fp.patch_fd(raw_fd, driver.read_bytes(), None if existing_slot else slot_driver.read_bytes())
+    after = inventory(fp, fd)
+    expected_added = {fp.DRIVER_GUID} - set(before)
+    if not existing_slot:
+        expected_added.add(fp.BOOT_SLOT_GUID)
+    if set(after)-set(before) != expected_added or fd_info['boot_slot_drivers'] != 1:
         raise ValueError('Unexpected additional firmware module')
+    slot_record['embedded_origin'] = 'input_fd' if existing_slot else 'pinned_upstream_build'
+    slot_record['embedded_ffs_sha256'] = sha(after[fp.BOOT_SLOT_GUID])
     # Containers may be rebuilt; all other inventoried firmware files remain identical.
     for guid, f in before.items():
-        if f[18] != 0x0b and after.get(guid) != f:
+        if f[18] != 0x0b and guid != fp.DRIVER_GUID and after.get(guid) != f:
             raise ValueError('Original executable firmware module changed')
     fd_path = out/(args.output_prefix+'.fd')
     fd_path.write_bytes(fd)
@@ -293,6 +304,9 @@ def main():
     print('[4/4] Package existing ESP configuration/assets + paired Android EFI', flush=True)
     shutil.copy2(driver, out/driver.name)
     shutil.copy2(app, out/app.name)
+    shutil.copy2(slot_driver, out/slot_driver.name)
+    for name in ('LICENSE.txt', 'NOTICE.txt'):
+        shutil.copy2(root/'port/boot-slot'/name, out/('BootSlotDxe-'+name))
     archive = out/(args.output_prefix+'-esp.zip')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         for file in sorted(esp_tree.rglob('*')):
@@ -368,6 +382,7 @@ def main():
         'system_table_sha256': sha((root/'src/visor_linux_system.c').read_bytes()),
         'secure_boot_policy_changed': False, 'hardware_tested': False,
     }
+    manifest['boot_slot_protocol'] = slot_record
     refind_binary = esp/'refind/bootaa64.efi'
     if refind_binary.is_file():
         manifest['linux_protocol']['refind_sha256'] = sha(refind_binary.read_bytes())
@@ -375,7 +390,9 @@ def main():
     if visor_record.exists():
         manifest['visor_upstream'] = json.loads(visor_record.read_text(encoding='utf-8'))
     (out/'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
-    checksum_files = [image_path, fd_path, archive, driver, app, out/'RenegadeMarkerLoops.bin', out/'manifest.json']
+    checksum_files = [image_path, fd_path, archive, driver, app, out/slot_driver.name,
+                      out/'BootSlotDxe-LICENSE.txt', out/'BootSlotDxe-NOTICE.txt',
+                      out/'RenegadeMarkerLoops.bin', out/'manifest.json']
     (out/'SHA256SUMS.txt').write_text(''.join(sha(p.read_bytes())+'  '+p.name+'\n' for p in checksum_files), encoding='ascii')
     if old_release_sha is not None and baseline.resolve() != image_path.resolve() and sha(baseline.read_bytes()) != old_release_sha:
         raise ValueError('Existing release image changed')

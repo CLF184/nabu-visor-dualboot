@@ -23,7 +23,7 @@ py -m pip install --target tools/python ziglang==0.14.1
 | --- | --- |
 | `third_party/visor` | Visor 菜单、配置解析与主题资源 |
 | `third_party/gnu-efi` | EFI C 库和头文件 |
-| `third_party/renegade` | Reboot2PayloadApp 与 BootShim 标记循环 |
+| `third_party/renegade` | Reboot2PayloadApp、BootShim 标记循环与 BootSlotDxe |
 
 准备 Windows 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，放到 `tools/official/`。补丁工具上游：[Project-Aloha/DualBootKernelPatcher](https://github.com/Project-Aloha/DualBootKernelPatcher)。仓库包含 nabu 补丁配置与入口代码，工具可执行文件需自行提供。
 
@@ -67,6 +67,7 @@ py build.py --boot "E:\path\original-android-boot.img" --fd "E:\path\new-nabu.fd
 | `nabu-visor-esp.zip` | 配置、图标、背景和配套 Android EFI 程序 |
 | `nabu-visor.fd` | 已加入菜单的固件 FD |
 | `NabuBootMenu.efi` / `NabuAndroid.efi` | 菜单驱动与独立 Android EFI 程序 |
+| `BootSlotDxe.efi` | 原版 Renegade A/B 槽位维护驱动，已包含在 FD 中 |
 | `RenegadeMarkerLoops.bin` | 配对标记循环与原厂 Recovery 入口代码 |
 | `manifest.json` / `SHA256SUMS.txt` | 构建来源与文件校验值 |
 
@@ -103,6 +104,8 @@ fastboot reboot
 | Recovery | 向 `misc` 写入并核对 `boot-recovery` 请求，再使用同一套标记与热重启流程 |
 
 Recovery 按钮使用已有 Recovery 镜像。原厂 Recovery 入口识别针对当前 nabu 的 FDT 启动参数约定；完整适配和限制见 [实现说明](docs/IMPLEMENTATION.md)。
+
+FD 同时包含原版 Renegade `BootSlotDxe`。每次进入 UEFI 时，它刷新当前 A/B 槽位的重试次数并标记启动成功，避免进入菜单或其他系统时因未被 Android 标记成功而耗尽启动重试次数。按上游逻辑也会清除两个槽位的不可启动标志，并补满尚未成功槽位的重试次数。若输入 FD 已含此驱动，保留原模块，不重复插入；不支持 A/B 的分区布局会跳过处理。
 
 ## 修改配置、背景和标题
 
@@ -199,6 +202,7 @@ nabu-visor-dualboot/
 ├─ prepare_linux.py         rEFInd Linux 配置与 ESP 包生成
 ├─ build.py                 构建入口
 ├─ image_builder.py         镜像与 ESP 包生成
+├─ boot_slot_build.py       编译原版 BootSlotDxe 与 BootSlotLib
 ├─ build_publish.py         成品发布、备份与失败回滚
 ├─ fd_patch.py              固件卷修改与校验
 ├─ patch_boot.py            内核/FD 补丁验证
@@ -211,6 +215,7 @@ nabu-visor-dualboot/
 ├─ src/                     nabu 平台适配层
 ├─ port/visor/              Visor 补丁
 ├─ port/renegade/            标记程序的 ABI 桥接与兼容头文件
+├─ port/boot-slot/           独立 BootSlotDxe 的 ABI 桥接、来源与许可
 ├─ port/recovery/            Recovery 请求、入口识别与构建覆盖器
 ├─ port/refind/              外部 rEFInd 资源的许可说明
 ├─ third_party/             三个编译依赖子模块

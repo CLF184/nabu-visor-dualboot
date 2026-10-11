@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parent
 FD_BASE = 0x9FC00000
 FD_SIZE = 0x300000
 DRIVER_GUID = uuid.UUID('dd685cee-7b4b-4d55-b7ab-e861d982eb3a').bytes_le
+BOOT_SLOT_GUID = uuid.UUID('ba325ac5-10ab-44e3-b6c1-5bd273a3bf2d').bytes_le
 BDS_FILE = uuid.UUID('6d33944a-ec75-4855-a54d-809c75241f6c').bytes_le
 BDS_PROTOCOL = uuid.UUID('665e3ff6-46cc-11d4-9a38-0090273fc14d').bytes_le
 BUTTONS_FILE = uuid.UUID('5bd181db-0487-4f1a-ae73-820e165611b3').bytes_le
@@ -90,15 +91,15 @@ def ffs_checksum(file):
     out[17]=(-sum(out[24:])) & 255 if out[19] & 0x40 else 0xAA
     return bytes(out)
 
-def make_driver(pe, erase=0xFF):
+def make_driver(pe, erase=0xFF, guid=DRIVER_GUID, name='NabuBootMenu', depex=None):
     check_pe(pe)
-    payload=section(0x13,b'\x02'+BDS_PROTOCOL+b'\x08') # PUSH BDS; END
+    payload=section(0x13,depex if depex is not None else b'\x02'+BDS_PROTOCOL+b'\x08') # PUSH BDS; END
     payload+=b'\0'*(-len(payload)%4)
     payload+=section(0x10,pe)
     payload+=b'\0'*(-len(payload)%4)
-    payload+=section(0x15,'NabuBootMenu\0'.encode('utf-16le'))
+    payload+=section(0x15,(name+'\0').encode('utf-16le'))
     size=24+len(payload)
-    header=DRIVER_GUID+b'\0\xaa'+bytes([7,0])+size.to_bytes(3,'little')+bytes([0xF8 if erase==0xFF else 7])
+    header=guid+b'\0\xaa'+bytes([7,0])+size.to_bytes(3,'little')+bytes([0xF8 if erase==0xFF else 7])
     return ffs_checksum(header+payload)
 
 def parse_fv(data):
@@ -184,13 +185,13 @@ def lzma_unpack(data):
         raise PatchError('LZMA uncompressed size mismatch')
     return raw
 
-def rewrite_sections(data, pe, info, depth):
+def rewrite_sections(data, pe, info, depth, slot_pe=None):
     if depth>8: raise PatchError('FV nesting limit exceeded')
     output=bytearray();changed=False
     for _,kind,hs,payload in iter_sections(data):
         new=payload
         if kind==0x17:
-            new,c=patch_fv(payload,pe,info,depth+1,allow_grow=True);changed |= c
+            new,c=patch_fv(payload,pe,info,depth+1,allow_grow=True,slot_pe=slot_pe);changed |= c
         elif kind==2:
             if len(payload)<20: raise PatchError('Truncated GUID-defined section')
             guid=payload[:16];data_offset,attrs=struct.unpack_from('<HH',payload,16)
@@ -199,12 +200,12 @@ def rewrite_sections(data, pe, info, depth):
             if guid==LZMA_GUID:
                 if attrs&2: raise PatchError('Authenticated LZMA sections cannot be repacked')
                 raw=lzma_unpack(payload[start:])
-                raw,c=rewrite_sections(raw,pe,info,depth+1)
+                raw,c=rewrite_sections(raw,pe,info,depth+1,slot_pe)
                 if c:new=payload[:start]+lzma_pack(raw);changed=True
         output.extend(section(kind,new));output.extend(b'\0'*(-len(output)%4))
     return (bytes(output) if changed else data),changed
 
-def patch_fv(data, pe, info, depth=0, allow_grow=False):
+def patch_fv(data, pe, info, depth=0, allow_grow=False, slot_pe=None):
     size,hs,erase,files,free=parse_fv(data)
     guids={f[:16] for _,f in files}
     target=BDS_FILE in guids and BUTTONS_FILE in guids
@@ -216,7 +217,7 @@ def patch_fv(data, pe, info, depth=0, allow_grow=False):
             built.append((off,make_driver(pe,erase)));changed=True;driver_present=True
             continue
         if file[18] in (0xF0,1,2): built.append((off,file));continue
-        body,c=rewrite_sections(file[24:],pe,info,depth+1)
+        body,c=rewrite_sections(file[24:],pe,info,depth+1,slot_pe)
         if c:
             file=bytearray(file[:24])+body
             if len(file)>=0xFFFFFF: raise PatchError('FFS would require extended size')
@@ -232,30 +233,43 @@ def patch_fv(data, pe, info, depth=0, allow_grow=False):
         old=u24(data[off+20:]);out[off:off+max(old,len(file))]=bytes([erase])*max(old,len(file))
         out[off:off+len(file)]=file
         if index+1==len(built):end=align(off+len(file),8)
+    additions=[]
+    if target and slot_pe is not None:
+        # Preserve the original BootSlotDxe GUID and TRUE dependency expression.
+        additions.append(('boot_slot',make_driver(slot_pe,erase,BOOT_SLOT_GUID,'BootSlotDxe',b'\x06\x08')))
     if target and not driver_present:
-        driver=make_driver(pe,erase);needed=end+align(len(driver),8)
+        additions.append(('menu',make_driver(pe,erase)))
+    for label,driver in additions:
+        needed=end+align(len(driver),8)
         if needed>size:
             if not allow_grow: raise PatchError('Top-level FV has insufficient space')
             header,new_size=resize_fv_header(out[:hs],size,needed)
             out.extend(bytes([erase])*(new_size-size));out[:hs]=header;size=new_size
         out[end:end+len(driver)]=driver;changed=True
-        info['driver_offset_in_dxe_fv']=end;info['dxe_fv_size']=size
+        info['driver_offset_in_dxe_fv' if label=='menu' else 'boot_slot_offset_in_dxe_fv']=end
+        info['dxe_fv_size']=size
+        end=needed
     return bytes(out)+data[struct.unpack_from('<Q',data,32)[0]:],changed
 
-def patch_fd(fd, pe):
+def patch_fd(fd, pe, slot_pe=None):
     if len(fd)!=FD_SIZE: raise PatchError('Nabu FD must be exactly 3 MiB for this memory map')
+    if slot_pe is not None and inspect_fd(fd)['boot_slot_drivers']:
+        raise PatchError('Input already contains BootSlotDxe; preserve it instead of inserting a duplicate')
     info={'targets':0,'driver':check_pe(pe)}
-    result,changed=patch_fv(fd,pe,info)
+    if slot_pe is not None:info['boot_slot_driver']=check_pe(slot_pe)
+    result,changed=patch_fv(fd,pe,info,slot_pe=slot_pe)
     if not changed or info['targets']!=1: raise PatchError('Expected one DXE FV containing Nabu ButtonsDxe and BdsDxe')
     if len(result)!=len(fd): raise PatchError('FD size changed unexpectedly')
     # A complete second parse verifies every rebuilt checksum/container.
     inventory=inspect_fd(result)
     if inventory['menu_drivers']!=1: raise PatchError('Menu driver insertion verification failed')
+    if slot_pe is not None and inventory['boot_slot_drivers']!=1:
+        raise PatchError('BootSlotDxe insertion verification failed')
     info.update(inventory);info['sha256']=sha(result)
     return result,info
 
 def inspect_fd(fd):
-    result={'menu_drivers':0,'bds_drivers':0,'buttons_drivers':0,'volumes':0,'files':0}
+    result={'menu_drivers':0,'boot_slot_drivers':0,'bds_drivers':0,'buttons_drivers':0,'volumes':0,'files':0}
     def sections(data,depth):
         if depth>8: raise PatchError('FV nesting limit exceeded')
         for _,kind,hs,p in iter_sections(data):
@@ -268,6 +282,7 @@ def inspect_fd(fd):
         for _,f in files:
             result['files']+=1
             result['menu_drivers']+=f[:16]==DRIVER_GUID
+            result['boot_slot_drivers']+=f[:16]==BOOT_SLOT_GUID
             result['bds_drivers']+=f[:16]==BDS_FILE
             result['buttons_drivers']+=f[:16]==BUTTONS_FILE
             if f[18] not in (0xF0,1,2): sections(f[24:],depth+1)

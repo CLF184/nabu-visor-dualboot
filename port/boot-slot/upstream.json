@@ -1,0 +1,21 @@
+{
+  "repo": "https://github.com/edk2-porting/edk2-msm",
+  "commit": "e1952621f419f8db60ed28271264e1b5184c571d",
+  "file_guid": "BA325AC5-10AB-44E3-B6C1-5BD273A3BF2D",
+  "sources": {
+    "GPLDrivers/Drivers/BootSlotDxe/BootSlotDxe.c": "b2210290c68e25ab5fb38840020823bb2283ccd2",
+    "GPLDrivers/Drivers/BootSlotDxe/BootSlotDxe.inf": "2de2263524504ae1832f9258456e554e64d1bbfa",
+    "GPLDrivers/Library/BootSlotLib/BlockIoUtils.c": "a05011e08683ce2603f71ea667d481f5bc3af334",
+    "GPLDrivers/Library/BootSlotLib/EFIUtils.c": "9f911088d58453facf6eae736e8dedf5503b5822",
+    "GPLDrivers/Library/BootSlotLib/PartitionTableUpdate.c": "a36314dd97983fdc679ae99721bf54fa08da8416",
+    "GPLDrivers/Library/BootSlotLib/StorageUtils.c": "16b4db34d8d6a083aff11a28468ca32b604bb4c7",
+    "GPLDrivers/Library/BootSlotLib/BootSlotLib.inf": "44ef8013d3adfb2b68bfe8dc4b0b54c1840b4b0f",
+    "GPLDrivers/Include/Library/BootSlotLib.h": "a1c0ae33c614306ce9649d84a91f561176d22775",
+    "GPLDrivers/Include/Library/BootSlotLib/BlockIoUtils.h": "aa8b6ba115626f5a7655b462ca5e52ff536b2d61",
+    "GPLDrivers/Include/Library/BootSlotLib/EFIUtils.h": "5f5e8c1b68e9740140fde625a31cfa4f3be1ab92",
+    "GPLDrivers/Include/Library/BootSlotLib/PartitionTableUpdate.h": "69fb1fa82598782ab3c863349b9cc2dc3601153c",
+    "GPLDrivers/Include/Library/BootSlotLib/StorageUtils.h": "f705a42955c932d8a033d6096c6bc2d965c9cb50",
+    "GPLDrivers/Include/Library/BootSlotLib/EFICardInfo.h": "95b87a3ab374626e9f65741a09a1ae36ab83f8fd",
+    "Silicon/Qualcomm/QcomPkg/QcomPkg.dec": "3c9ec509c407c00c0df270e420e20ac485d0f68b"
+  }
+}

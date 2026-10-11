@@ -16,6 +16,16 @@ Visor 编译为 AArch64 DXE 驱动 `NabuBootMenu.efi`，插入基础 FD，挂接
 
 `tests/test_landscape.c` 使用主机模拟 GOP 与缓存接口，检查合并绘制与原缩放/调色规则的像素一致性、透明像素、重复映射与分块边界、非对齐局部刷新、行填充、RGB/BGR 色序、截图缓存转回、越界请求及缓存失败回退。新镜像的实际播放流畅度仍需真机确认；源码路径优化不等同于已经达到指定帧率。
 
+## A/B 槽位维护
+
+`boot_slot_build.py` 直接编译固定版本 Renegade 的 `BootSlotDxe.c` 与原版 `BootSlotLib`，生成独立 `BootSlotDxe.efi`，不将槽位算法链接进 Visor。源文件与协议声明通过 Git blob 校验；`port/boot-slot/` 仅提供 EDK2 库函数、协议 GUID、打包设备路径结构的 ABI 桥接及 EFI 入口。
+
+FFS GUID 保持上游 `BA325AC5-10AB-44E3-B6C1-5BD273A3BF2D`，依赖表达式保持原版 `TRUE`。驱动插入菜单所在 DXE 固件卷，原 FD 已包含相同 GUID 时保留原模块，不重复添加或覆盖。每次进入 UEFI 执行原版 BootSlotMain：识别存储和 A/B 布局，对尚未 successful 或被标为不可启动的槽位清除不可启动标志并补满重试次数，再刷新当前槽位的优先级、重试次数并设置 successful，同时降低另一槽位的优先级、清除其 active 标志。未支持的存储或非 A/B 布局跳过处理。当前槽位为空时按上游回退 A；具体识别和写入仍由原 BootSlotLib 完成，不新增 boot-time BCB 检测。
+
+槽位属性写入 GPT，并更新相应主、备表 CRC；原库也会核对当前槽位与 UFS Boot LUN，发现不一致时按原版规则纠正 Boot LUN。不更换内核、Recovery、misc 请求或 Secure Boot 策略。该驱动标记的是进入 UEFI 的槽位，不代表已经验证某个操作系统启动成功；原版也会清除另一槽位不可启动标志，不能把它理解为对另一槽位镜像有效性的检查。驱动只在 FD 能执行时工作，不能救回此前已被 bootloader 拒绝、无法进入 UEFI 的槽位。
+
+主机模拟测试 `tests/test_boot_slot.c` 执行原版驱动与库，检查当前槽位为 A 或 B 时 UFS LUN 4 的主备 GPT 更新、CRC、其他分区与 LUN 字节保留、重复执行和非 A/B 跳过。上游低层 GPT 写入错误并非都能向 BootSlotMain 完整传播，本移植保留其处理方式，不额外改写槽位策略。许可及对应源代码见 `port/boot-slot/NOTICE.txt` 和固定版本 Renegade 子模块。
+
 ## Android 标记配对
 
 Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。构建直接读取子模块中的 `Reboot2PayloadApp.c` 并校验 Git blob。
