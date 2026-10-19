@@ -91,6 +91,7 @@ fastboot reboot
 
 - 音量上/下切换系统条目和左下角电源动作，电源键松开时确认。
 - 默认 Android，首次 5 秒无输入自动启动；输入后本次不再倒计时。
+- bootloader 指定关机充电模式时，直接继续原 Android 充电路径，不进入菜单或倒计时；基础 boot 的内核与 ramdisk 需支持关机充电。
 - 左下角依次为关机、重启、Recovery。Recovery 沿用 Visor 原版固件设置图标。
 - 电源＋音量上触发原厂 Recovery 环境时，入口直接继续原内核；bootloader 为 `fastboot reboot recovery` / `adb reboot recovery` 提供相同环境时也走此入口。
 - 保留上游文件浏览、编辑器和键盘功能。浏览器或快照覆盖 EFI/内核路径时，优先启动本次选中的文件。普通 EFI 加载失败沿用上游错误恢复界面，文字操作需要 USB 键盘。

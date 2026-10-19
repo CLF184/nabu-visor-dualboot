@@ -362,6 +362,14 @@ def main():
             'fallback': 'invalid or unrecognised FDT continues the existing FD/Visor flow; no boot-time BCB detection',
             'scope': 'nabu recovery-as-boot using kernel command-line parameters; not a bootconfig parser',
         }
+        manifest['native_charger_protocol'] = {
+            'input': 'original bootloader FDT pointer in x0, before the Nabu FD handoff',
+            'recognition': 'valid bounded v17 FDT; root model NABU; chosen/bootargs has androidboot.hardware=qcom and the complete androidboot.mode=charger token',
+            'priority': 'charger mode bypasses the menu even when androidboot.force_normal_boot=1 is present',
+            'action': 'continue the original Android kernel through the unchanged marker-clear loop; no reset or BCB write',
+            'preserved': 'original x0-x3, FDT, ramdisk and Android charger implementation',
+            'scope': 'nabu bootloader command-line charger mode; not a battery threshold or bootconfig parser',
+        }
         manifest['notes'] = [
             'Newly generated image; requires hardware verification even though the released implementation was tested.',
             'Android uses the same paired Renegade markers previously verified by the user.',

@@ -1,10 +1,13 @@
 /* SPDX-License-Identifier: MIT
- * Preserve nabu's recovery-as-boot handoff before the FD overwrites x0/x1.
+ * Preserve nabu's Recovery and off-mode charging handoff before the FD
+ * overwrites x0/x1.
  * Entered only after the unchanged Renegade marker scan found no marker.
  * Linux arm64 entry: x0 = bootloader FDT, x1..x3 = 0. No stack is used;
  * x0..x3 remain intact. Invalid/unrecognised data continues to the menu.
  * On this nabu boot protocol normal Android has force_normal_boot=1;
  * the original bootloader omits it for Recovery (including the key path).
+ * androidboot.mode=charger must also continue the original kernel directly,
+ * retaining the bootloader charging environment without a menu/reset cycle.
  */
 .Lnative_recovery:
     /* Check the original FDT pointer before dereferencing it. */
@@ -70,7 +73,7 @@
     add x11, x0, x7
     mov w12, #0                 /* Node depth. */
     mov w13, #0                 /* In the top-level chosen node. */
-    mov w14, #0                 /* model=1, bootargs=2, normal=4, qcom=8. */
+    mov w14, #0                 /* model=1, bootargs=2, normal=4, qcom=8, charger=16. */
 .Lnative_token:
     add x4, x8, #4
     cmp x4, x9
@@ -88,6 +91,10 @@
     cmp w4, #9
     b.ne .Lnative_continue
     cbnz w12, .Lnative_continue
+    /* Charging takes precedence over force_normal_boot, as in Android init. */
+    orr w4, w14, #4
+    cmp w4, #31
+    b.eq _ClearFlags
     cmp w14, #11
     b.ne .Lnative_continue
     /* Preserve the incoming kernel arguments and use the upstream clear
@@ -192,8 +199,29 @@
     adr x16, .Lnative_normal
     mov x17, x22
     bl .Lnative_prefix
-    cbz w18, .Lnative_hardware
+    cbz w18, .Lnative_check_charger
     orr w14, w14, #4
+.Lnative_check_charger:
+    /* Match the whole charger token, not another argument's value/prefix. */
+    cmp x21, x7
+    b.eq .Lnative_charger_value
+    ldrb w4, [x21, #-1]
+    cmp w4, #32
+    b.ne .Lnative_hardware
+.Lnative_charger_value:
+    mov x15, x21
+    adr x16, .Lnative_charger
+    mov x17, x22
+    bl .Lnative_prefix
+    cbz w18, .Lnative_hardware
+    cmp x15, x22
+    b.hs .Lnative_continue
+    ldrb w4, [x15]
+    cbz w4, .Lnative_is_charger
+    cmp w4, #32
+    b.ne .Lnative_hardware
+.Lnative_is_charger:
+    orr w14, w14, #16
 .Lnative_hardware:
     mov x15, x21
     adr x16, .Lnative_qcom
@@ -245,5 +273,6 @@
 .Lnative_chosen: .asciz "chosen"
 .Lnative_bootargs: .asciz "bootargs"
 .Lnative_normal: .asciz "androidboot.force_normal_boot=1"
+.Lnative_charger: .asciz "androidboot.mode=charger"
 .Lnative_qcom: .asciz "androidboot.hardware=qcom"
 .balign 4

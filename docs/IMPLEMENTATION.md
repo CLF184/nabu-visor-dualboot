@@ -61,6 +61,12 @@ Renegade 源码固定为 `e1952621f419f8db60ed28271264e1b5184c571d`。构建直�
 
 开机不执行 BCB 自动检测或热重启；菜单 Recovery 按钮仍保留写请求、标记和热重启流程。
 
+### 关机充电入口
+
+磁吸版 ShellCode 在选择 Android 时直接继续原内核，不经过菜单或额外重启，因此保留 bootloader 的关机充电环境。菜单版在同一原生入口检查完整的 `androidboot.mode=charger` 参数；有效 nabu FDT 同时包含 `androidboot.hardware=qcom` 时，直接清除一次性标记并继续原内核，即使存在 `androidboot.force_normal_boot=1` 也优先处理充电启动。
+
+此路径不启动 Visor、不执行五秒倒计时、不写 BCB、不热重启，保留 x0～x3、FDT、ramdisk 与原 Android 的充电程序。低电量策略、充电画面和电源键行为由原系统处理；不按 USB 是否连接或任意电量阈值判断，以免影响插电时正常开机。无充电参数、无效 FDT 或其他设备继续原有入口规则。当前识别限于 nabu bootloader 的命令行参数，不解析 bootconfig。
+
 ## Windows 与普通 EFI 条目
 
 Android 配置 `nabu_action=android`，Windows 配置 `nabu_action=bds`。旧配置缺少这些键会进入普通 EFI 加载路径；升级时须检查实际 ESP 的 `boot.conf` 并替换配套 Android EFI，保留个人外观设置。
