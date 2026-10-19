@@ -820,6 +820,14 @@ background=\EFI\visor\backgrounds\default.png
 
 # ----------------------------------------------------------------------------
 
+# nabu Ubuntu 示例：准备本项目配套 rEFInd 和 Ubuntu EFI 文件后取消注释。
+# entry {
+#     name=Ubuntu
+#     icon=\EFI\visor\icons\ubuntu.png
+#     kernel=\EFI\ubuntu\6.14.11.efi
+#     nabu_action=linux
+# }
+
 # Linux example - EFI stub kernel or Unified Kernel Image (UKI).
 # For a UKI, point "kernel" at the .efi and omit initrd/cmdline.
 # For a plain stub kernel, supply initrd and cmdline as shown.
