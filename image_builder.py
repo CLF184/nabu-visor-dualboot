@@ -255,7 +255,8 @@ def main():
     magisk = official/'magiskboot.exe'
     run(magisk, 'unpack', '-h', 'stock-boot.img', cwd=boot_dir)
     original = (boot_dir/'kernel').read_bytes()
-    android_entry = bp.branch_target(struct.unpack_from('<I', original)[0], 0)
+    entry_offset = 4 if original[:2] == b'MZ' else 0
+    android_entry = bp.branch_target(struct.unpack_from('<I', original, entry_offset)[0], entry_offset)
     run(official/'DualBootKernelPatcher-x86_64.exe', 'kernel', fd_path, 'patchedKernel',
         official/'DualBoot.Sm8150.cfg', official/'ShellCode.Nabu2.bin', cwd=boot_dir)
     patched = (boot_dir/'patchedKernel').read_bytes()
