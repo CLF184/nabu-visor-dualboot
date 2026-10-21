@@ -27,7 +27,11 @@ py -m pip install --target tools/python ziglang==0.14.1
 
 仓库已包含构建使用的 Windows x64 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，位于 `tools/official/`，拉取后无需另行下载补丁工具。沿用现用工具版本，不改变打补丁流程；来源、许可证和 SHA-256 见 [补丁工具说明](tools/official/README.md)。
 
-另外准备**未加本菜单补丁的 Android boot.img** 和**原始 nabu UEFI .fd**。默认路径如下，也可在命令中指定：
+另外准备**未加本菜单补丁的 Android boot.img** 和**原始 nabu UEFI .fd**。
+
+如果手里只有 nabu UEFI `.img`，可使用 [ArKT 的 UEFI FD 提取网页](https://arkt-7.github.io/nabu-uefi-autopatcher/) 上传该镜像，在 `EXTRACTED COMPONENTS` 中下载 `extracted.fd`。将它作为构建命令的 `--fd` 输入，或改名为 `nabu-uefi.fd` 放到 `tools/official/`。请从未加入本菜单补丁的原始 UEFI 镜像提取，Android `boot.img` 仍需另行准备。
+
+默认路径如下，也可在命令中指定：
 
 | 项目 | 默认路径 |
 | --- | --- |
