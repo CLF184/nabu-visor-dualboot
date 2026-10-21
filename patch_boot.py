@@ -28,9 +28,12 @@ def branch_target(word: int, pc: int) -> int:
 
 
 def verify_patched(kernel: bytes, original: bytes, fd: bytes, android_entry: int):
-    if len(kernel) != len(original) + len(fd):
+    fd_offset = (len(original) + 15) & ~15
+    if len(kernel) != fd_offset + len(fd):
         raise SystemExit('打补丁后的内核大小不符合预期')
-    if kernel[len(original):len(original) + len(fd)] != fd:
+    if kernel[len(original):fd_offset] != bytes(fd_offset - len(original)):
+        raise SystemExit('内核与 FD 之间的对齐填充不是零')
+    if kernel[fd_offset:] != fd:
         raise SystemExit('FD 并未原样附加在原始内核之后')
     w0 = struct.unpack_from('<I', kernel, 0x00)[0]
     w1 = struct.unpack_from('<I', kernel, 0x04)[0]
@@ -39,7 +42,7 @@ def verify_patched(kernel: bytes, original: bytes, fd: bytes, android_entry: int
     if branch_target(w1, 0x04) != android_entry:
         raise SystemExit(f'0x04 未指回 Android 入口（目标 {branch_target(w1,0):#x}，期望 {android_entry:#x}）')
     cfg = struct.unpack_from('<QQQ', kernel, 0x20)
-    if cfg != (0x9FC00000, 0x300000, len(original)):
+    if cfg != (0x9FC00000, 0x300000, fd_offset):
         raise SystemExit(f'分流配置不符: {[hex(v) for v in cfg]}')
     # 分流代码区（0x40..0xAF）必须与官方音量键分流代码逐字节一致
     sc = (OFFICIAL / 'ShellCode.Nabu2.bin').read_bytes()

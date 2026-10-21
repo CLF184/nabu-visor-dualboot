@@ -257,6 +257,11 @@ def main():
     original = (boot_dir/'kernel').read_bytes()
     entry_offset = 4 if original[:2] == b'MZ' else 0
     android_entry = bp.branch_target(struct.unpack_from('<I', original, entry_offset)[0], entry_offset)
+    # The upstream patcher appends FD at a 16-byte boundary, but its implicit
+    # padding is uninitialized. Supply zero padding without changing payload bytes.
+    fd_offset = fp.align(len(original), 16)
+    if fd_offset != len(original):
+        (boot_dir/'kernel').write_bytes(original + bytes(fd_offset - len(original)))
     run(official/'DualBootKernelPatcher-x86_64.exe', 'kernel', fd_path, 'patchedKernel',
         official/'DualBoot.Sm8150.cfg', official/'ShellCode.Nabu2.bin', cwd=boot_dir)
     patched = (boot_dir/'patchedKernel').read_bytes()
@@ -284,7 +289,7 @@ def main():
         struct.pack_into('<Q', result_kernel, 16, fp.align(len(result_kernel), 4096))
     if result_kernel[0xb0:len(original)] != original[0xb0:]:
         raise ValueError('Android kernel payload was modified')
-    if result_kernel[len(original):origin] != fd or result_kernel[0x70:0xb0] != patched[0x70:0xb0]:
+    if result_kernel[fd_offset:origin] != fd or result_kernel[0x70:0xb0] != patched[0x70:0xb0]:
         raise ValueError('Nabu FD copy/handoff convention changed')
     (boot_dir/'kernel').write_bytes(result_kernel)
     run(magisk, 'repack', 'stock-boot.img', 'new-boot.img', cwd=boot_dir)
@@ -324,7 +329,8 @@ def main():
         'android_protocol': {'address': '0x17FE00000', 'value_u16': '0x5241', 'count': 128,
                              'cache': 'write-back and invalidate of 256 bytes', 'reset': 'existing FD EfiResetWarm',
                              'reader': 'scan 128 halfwords; any match clears all 256 bytes then branches to Android'},
-        'kernel': {'original_size': len(original), 'fd_offset': len(original), 'helper_offset': origin,
+        'kernel': {'original_size': len(original), 'fd_offset': fd_offset,
+                   'padding_size': fd_offset - len(original), 'helper_offset': origin,
                    'helper_size': len(helper), 'android_entry': hex(android_entry), 'sha256': sha(result_kernel)},
         'verification': {'original_executable_firmware_modules_unchanged': True,
                          'original_generic_psci_reset_retained': True, 'original_android_payload_unchanged': True,
