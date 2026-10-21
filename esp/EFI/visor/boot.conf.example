@@ -1,541 +1,493 @@
 # ============================================================================
-#  Visor boot manager configuration
-#  Location on the EFI System Partition (ESP):  \EFI\visor\boot.conf
+#  Visor 启动管理器配置
+#  在 EFI 系统分区（ESP）上的位置：\EFI\visor\boot.conf
 #
-#  Every key below is shown with its default and commented out, so this file
-#  can be copied as-is: uncomment only what you want to change.
+#  下文列出各配置项及其默认值，大部分已注释，可直接复制使用：
+#  只需取消想要修改的配置项前面的注释。
 #
-#  File syntax:
-#    - One  key = value  per line. Whitespace around '=' is ignored.
-#    - '#' starts a comment. Inside a value it only counts when a space comes
-#      before it, so  title_color=#7AA2F7  is a color, not a comment.
-#    - Quote values containing spaces:  cmdline = "root=... rw quiet"
-#      The surrounding quotes are stripped.
-#    - Entry blocks are  entry { ... }  - see "Boot entries" at the bottom.
-#      Blank lines and comments inside a braced block are fine. Without the
-#      braces the first blank line ends the block, so brace your entries.
-#    - Repeating a key keeps the last value. Unknown keys are ignored; an
-#      invalid value is logged and the previous setting kept.
+#  文件语法：
+#    - 每行一个 key = value，忽略等号两侧的空白。
+#    - '#' 表示注释。在配置值内部，只有前面有空格时才视为注释，
+#      因此 title_color=#7AA2F7 表示颜色，并非注释。
+#    - 含空格的值应加引号，例如 cmdline = "root=... rw quiet"；
+#      解析时会去掉两端的引号。
+#    - 启动项使用 entry { ... } 块，见末尾的“启动项”部分。
+#      大括号内可以有空行和注释；不使用大括号时，第一个空行会结束该块，
+#      因此建议始终为启动项加上大括号。
+#    - 重复配置同一个键时，以最后一次的值为准。未知键会被忽略；
+#      无效值会被记录到日志，同时保留之前的设置。
 #
-#  Notes on paths:
-#    - File paths are relative to the root of the filesystem containing the
-#      target and use back-slashes. Assets normally live on the ESP, e.g.
-#      \EFI\visor\icons\arch.png.
-#    - Colors are hex in the form  #RRGGBB  (e.g. #7AA2F7).
-#    - Kernels/initrds on a non-FAT /boot (btrfs, ext4, ...) are unreadable by
-#      UEFI unless you drop an efifs driver into \EFI\visor\drivers\. For a
-#      separate /boot filesystem use \vmlinuz-...; use \boot\vmlinuz-... only
-#      when /boot is a directory inside the root filesystem. Visor also accepts
-#      the older mount-prefixed form when the exact path is absent. A UKI on the
-#      ESP under \EFI\Linux\*.efi always works without a driver.
+#  路径说明：
+#    - 文件路径以目标文件所在文件系统的根目录为起点，使用反斜杠。
+#      素材通常放在 ESP 上，例如 \EFI\visor\icons\arch.png。
+#    - 颜色使用 #RRGGBB 格式的十六进制值，例如 #7AA2F7。
+#    - 非 FAT 文件系统（btrfs、ext4 等）上的内核和 initrd 默认无法被 UEFI 读取，
+#      需要在 \EFI\visor\drivers\ 放入 efifs 驱动。
+#      如果 /boot 是独立文件系统，使用 \vmlinuz-...；只有 /boot 是根文件系统内
+#      的目录时才使用 \boot\vmlinuz-...。确切路径不存在时，Visor 也接受旧式的
+#      挂载点前缀路径。放在 ESP 的 \EFI\Linux\*.efi 下的 UKI 无需文件系统驱动。
 #
-#  Layout of this file:
-#      Boot behaviour        what boots, and whether the menu is shown
-#      Entry discovery       where Visor looks when it auto-detects entries
-#      Menu appearance       overall shape of the menu; input devices
-#      Diagnostics           the boot log
-#      Logo / Colors / Blur / Animation / Font sizes / Icons / Underline /
-#      Power actions / Background / Dynamic accent / Themes  - styling
-#      Snapshots             booting into btrfs snapshots
-#      Boot entries          the entry { } blocks themselves
+#  文件内容：
+#      启动行为              默认启动项以及是否显示菜单
+#      启动项发现            自动检测启动项时的搜索位置
+#      菜单外观              菜单整体布局与输入设备
+#      诊断                  启动日志
+#      标志、颜色、模糊、动画、字号、图标、下划线、电源操作、背景、动态配色、主题
+#      快照                  从 btrfs 快照启动
+#      启动项                entry { } 块
 # ============================================================================
 
-# --- Boot behaviour ---------------------------------------------------------
-# What gets booted, and whether the menu is shown at all.
+# --- 启动行为 ---------------------------------------------------------------
+# 选择启动目标，以及是否显示菜单。
 
-# Seconds before the default entry auto-boots:
-#    N   wait N seconds, then boot the default entry
-#   -1   never auto-boot - wait for the user to choose
-#    0   boot the default entry immediately (skips the menu entirely)
+# 自动启动默认项之前等待的秒数：
+#    N   等待 N 秒，然后启动默认项
+#   -1   不自动启动，等待用户选择
+#    0   立即启动默认项，完全跳过菜单
 timeout=5
 
-# Index of the default entry (0-based, in the order entries appear below).
+# 默认启动项的编号，从 0 开始，按下方启动项出现的顺序计数。
 default=0
 
-# Skip the menu and boot straight away. 1 = if only one entry exists, boot it; if
-# several exist, boot the remembered/default entry (the one default=/remember_last
-# would have preselected) - all without drawing a menu. Hold any key during power-on
-# to interrupt and show the menu anyway. 0 = always show the menu (default).
+# 跳过菜单直接启动。1 = 只有一个启动项时直接启动它；有多个时启动记住的项
+# 或默认项（即 default=/remember_last 原本会预选的项），全程不绘制菜单。
+# 开机时按住任意键可打断此行为并显示菜单。
+# 0 = 始终显示菜单（默认值）。
 #autoboot=0
 
-# Remember the last-booted entry and preselect it next time (persisted in an NVRAM
-# variable). When on, this OVERRIDES default=. 0 = always honour default=. (alias: remember)
+# 记住上一次启动的项，下次预先选中它，使用 NVRAM 变量保存。
+# 启用后优先于 default=；0 = 始终遵循 default=。别名：remember。
 #remember_last=0
 
-# --- Boot self-heal ---------------------------------------------------------
-# Windows and other OS updates may reorder the NVRAM boot list, remove the
-# Visor Boot#### entry or overwrite the firmware fallback path
-# (\EFI\BOOT\BOOTx64.EFI).  These options let Visor repair the damage
-# automatically at every startup.  Nothing is written when there is nothing
-# to fix, and removable media are always left untouched.
+# --- 启动自修复 -------------------------------------------------------------
+# Windows 或其他系统更新可能重排 NVRAM 启动列表、删除 Visor 的 Boot#### 项，
+# 或覆盖固件回退路径（\EFI\BOOT\BOOTx64.EFI）。以下选项允许 Visor 每次启动时
+# 自动修复这些变化。无需修复时不执行写入，也始终不会修改可移动介质。
 
-# Master switch. 0 = skip the entire self-heal pass.
+# 总开关。0 = 完全跳过自修复。
 #selfheal=1
 
-# NVRAM Boot-entry policy.
-#   off    - never touch NVRAM variables.
-#   ensure (default) - recreate a missing Visor Boot#### entry; if it has been
-#            removed from BootOrder, append it back at the tail.
-#   first  - same as ensure, plus: when BootCurrent matches the
-#            Visor entry (a normal boot through the firmware boot manager),
-#            keep Visor first in BootOrder.  Only rearranges an existing
-#            order - never invents one.
-# To protect NVRAM from firmware/OS reorder wars, any BootOrder rewrite arms
-# a short cooldown: further rewrites are skipped for the next few boot periods
-# (counted with a small stamp file on the ESP, not in NVRAM).
-# (alias: boot_order)
+# NVRAM 启动项维护策略：
+#   off     不修改 NVRAM 变量。
+#   ensure  默认值：重建缺失的 Visor Boot#### 项；如果该项被移出 BootOrder，
+#           就将它重新追加到列表末尾。
+#   first   在 ensure 基础上，当 BootCurrent 对应 Visor 项时（即经固件启动管理器
+#           正常启动），保持 Visor 位于 BootOrder 首位。只重排已有顺序，不创建新顺序。
+# 为避免固件和系统反复争夺启动顺序，每次重写 BootOrder 后会进入短暂冷却期，
+# 接下来几个启动周期内跳过重写。计数使用 ESP 上的小标记文件，不写入 NVRAM。
+# 别名：boot_order。
 #boot_order=ensure
 #selfheal_order=ensure
 
-# Re-copy the running Visor binary to the default fallback path at startup.
-# Windows feature updates and 24H2 may replace \EFI\BOOT\BOOTx64.EFI with
-# a copy of bootmgfw.efi; this restores it.
+# 启动时将正在运行的 Visor 程序重新复制到默认回退路径。
+# Windows 功能更新或 24H2 可能用 bootmgfw.efi 的副本替换
+# \EFI\BOOT\BOOTx64.EFI；此选项将其恢复为 Visor。
 #restore_fallback=1
 
-# Global default kernel command line. Applied to any entry that does not set its
-# own cmdline/options - including auto-detected raw kernels (which otherwise have
-# no root=). Per-entry cmdline always wins. (alias: options)
+# 全局默认内核命令行，适用于没有单独设置 cmdline/options 的启动项，
+# 也适用于自动检测到的原始内核（否则没有 root= 参数）。
+# 启动项自己的 cmdline 始终优先。别名：options。
 #cmdline=root=PARTUUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx rw quiet
 
-# 1 = suppress all boot-progress text (plain black screen during hand-off to
-# the OS instead of "Booting <name>..."). 0 = show progress text.
+# 1 = 隐藏启动交接阶段的所有进度文字，显示黑屏，替代“Booting <name>...”提示。
+# 0 = 显示进度文字。
 quiet=0
 
-# Allow editing an entry's kernel command line at the menu: select an entry and
-# press 'e', edit, Enter boots with the change (one-shot, not saved). Set 0 to
-# disable (e.g. on locked-down machines). 1 = on (default).
+# 允许在菜单中编辑启动项的内核命令行：选中后按 e 编辑，按 Enter 使用修改后的参数
+# 启动一次，不保存修改。0 = 禁用（例如限制用户修改的设备）；1 = 启用（默认值）。
 #editor=1
 
-# Pressing Esc at the boot menu opens the options / rescue console (the same
-# console Visor drops into after a failed boot): list and pick entries, edit the
-# kernel options for one boot, read boot.log, reboot or enter firmware setup.
-# Esc there returns to the menu.
+# 在启动菜单按 Esc 打开选项／救援控制台，与启动失败后进入的控制台相同。
+# 可以列出并选择启动项、临时编辑内核参数、读取 boot.log、重启或进入固件设置。
+# 在控制台再次按 Esc 返回菜单。
 
 
-# --- Entry discovery --------------------------------------------------------
-# Where Visor looks for bootable things, and which extra entries it makes up.
-# Auto-detection only runs when this file lists no entry { } blocks of its own.
+# --- 启动项发现 -------------------------------------------------------------
+# 配置 Visor 搜索可启动内容的位置，以及自动生成的附加启动项。
+# 只有当前文件没有自行定义 entry { } 块时才执行自动检测。
 
-# How hard Visor looks for entries when boot.conf lists none and it has to
-# auto-detect them.
-#   deep  -> open every filesystem the firmware exposes (default). Finds
-#            kernels that live in /boot on a root filesystem, at the cost of a
-#            few seconds on machines with several disks.
-#   quick -> look only at the volume Visor booted from, the EFI system
-#            partitions and any XBOOTLDR (separate /boot) partition. Much
-#            faster. If a quick scan turns up nothing at all, Visor falls back
-#            to a deep scan rather than showing an empty menu.
-# Aliases: scan_mode; also quick_scan=1 / deep_scan=0, each with the underscore
-# dropped too (quickscan, deepscan).
+# boot.conf 没有启动项而必须自动检测时的搜索范围：
+#   deep   打开固件提供的所有文件系统（默认值）。可以找到根文件系统 /boot 中的内核，
+#          但多磁盘设备上可能需要数秒。
+#   quick  只搜索 Visor 启动所在卷、EFI 系统分区和 XBOOTLDR（独立 /boot）分区，
+#          速度快得多。如果完全没有找到启动项，会回退到 deep 扫描，避免显示空菜单。
+# 别名：scan_mode；也支持 quick_scan=1 / deep_scan=0，
+# 以及不带下划线的 quickscan、deepscan。
 #scan=deep
 
-# Live hotplug: while the menu is up, Visor watches for volumes that appear
-# (a USB stick plugged in), scans them for bootable content (Windows, UKIs,
-# kernels, distro loaders, \EFI\BOOT\BOOTX64.EFI) and pops matching entries
-# into the menu - the new icon fades in and the row slides over to make room.
-# Entries are pinned to the volume they were found on. 1 = on (default), 0 = off.
+# 实时热插拔：显示菜单期间，Visor 监视新出现的卷（例如插入的 U 盘），
+# 搜索 Windows、UKI、内核、发行版加载器和 \EFI\BOOT\BOOTX64.EFI，
+# 并将匹配的启动项加入菜单。新图标淡入，原有图标行滑动让出位置。
+# 启动项固定关联到发现它的卷。1 = 启用（默认值），0 = 关闭。
 #hotplug=1
 
-# Also sweep media that was ALREADY plugged in when Visor started. Scanning
-# volumes costs time (and, with a filesystem driver installed, a probe of every
-# partition), so by default this happens only when Visor auto-detected the
-# entries: if boot.conf lists entries, Visor trusts them and only watches for
-# media that appears later. Set to 1 to sweep anyway - it runs after the menu is
-# already on screen, one volume at a time. Alias: hotplug_scan_existing.
+# 同时扫描 Visor 启动前就已连接的介质。扫描卷需要时间，安装文件系统驱动后还会
+# 探测每个分区，因此默认只在 Visor 自动检测启动项时执行：如果 boot.conf 已列出
+# 启动项，就直接使用配置，仅监视之后出现的介质。
+# 设为 1 可始终扫描已有介质；扫描在菜单显示后逐卷进行。
+# 别名：hotplug_scan_existing。
 #scan_existing=0
 
-# Auto-generate a "<name> (recovery)" entry for each Linux entry, appending
-# "systemd.unit=rescue.target nomodeset" to its cmdline. 0 = off. (alias: recovery)
+# 为每个 Linux 项自动生成“<name> (recovery)”恢复项，
+# 在其命令行追加 systemd.unit=rescue.target nomodeset。
+# 0 = 关闭。别名：recovery。
 #recovery_entries=0
 
-# Filesystem snapshot booting.  (Full details in the Snapshots section below.)
-#    1         auto (default): load \EFI\visor\snapshots.conf if present, else
-#              auto-detect snapper/Timeshift/plain btrfs snapshots
-#    manifest  use only \EFI\visor\snapshots.conf (no auto-detection)
-#    0         disable snapshot loading entirely
+# 从文件系统快照启动，完整说明见下方“快照”部分：
+#    1         自动模式（默认值）：优先读取 \EFI\visor\snapshots.conf，
+#              不存在时自动检测 Snapper、Timeshift 或普通 btrfs 快照。
+#    manifest  只使用 \EFI\visor\snapshots.conf，不自动检测。
+#    0         完全禁用快照加载。
 #snapshots=1
 
-# BLS (Boot Loader Specification) deployment browsing. Always on - no switch
-# needed. Visor scans \loader\entries and \boot\loader\entries on every volume
-# (ESP and XBOOTLDR) and folds matching *.conf files into a single per-OS menu
-# entry whose deployments you cycle with V / Ctrl+arrow. Supported fields:
-#   title version linux        required title plus a linux kernel or an efi
-#   efi   initrd options       program; efi-only entries are chainloaded
-#   machine-id architecture    arch mismatch (e.g. EFIARM on x86_64) is skipped
-#   sort-key                   groups sort by ostree index (newest first) then
-#                              alphabetically by sort-key; repeated initrd and
-#                              options lines accumulate in order. Entry
-#                              basenames ending in +N-M drive the boot-counter
-#                              (tries-left) rollback behaviour.
-#
+# BLS（Boot Loader Specification，启动加载器规范）部署版本浏览始终启用，
+# 无需额外开关。Visor 扫描各卷（ESP 和 XBOOTLDR）的 \loader\entries 与
+# \boot\loader\entries，将匹配的 *.conf 合并成每个系统一个菜单项，
+# 使用 V 或 Ctrl+方向键切换部署版本。支持的字段：
+#   title version linux        必须有 title，并指定 linux 内核或 efi 程序；
+#   efi   initrd options       只有 efi 的项使用链式加载。
+#   machine-id architecture    跳过架构不匹配的项，例如在 x86_64 上遇到 EFIARM。
+#   sort-key                   分组先按 ostree 索引排序（最新在前），再按 sort-key
+#                              字母顺序排序；重复的 initrd 和 options 行按顺序累积。
+#                              文件基本名末尾的 +N-M 用于启动次数计数
+#                              （剩余尝试次数）和回滚行为。
 
 
-# --- Menu appearance and input ----------------------------------------------
-# The menu's overall shape. Finer styling has its own sections further down
-# (Logo, Colors, Blur, Animation, Font sizes, Icons, Underline, Power actions,
-# Background, Dynamic accent, Themes).
+# --- 菜单外观与输入 ---------------------------------------------------------
+# 菜单整体布局。更细的样式设置见下方标志、颜色、模糊、动画、字号、图标、
+# 下划线、电源操作、背景、动态配色和主题各节。
 
-# 1 = use the plain text-console menu instead of the graphical one, even when a
-# graphics adapter is available. Visor ALSO falls back to this text menu
-# automatically if no Graphics Output Protocol is found, so set this only if you
-# prefer the text UI. 0 = graphical menu (default). (alias: text_mode)
+# 1 = 即使图形适配器可用，也使用纯文本控制台菜单。
+# 未发现图形输出协议（GOP）时，Visor 也会自动回退到文本菜单，
+# 因此只在偏好文本界面时手动启用。0 = 图形菜单（默认值）。别名：text_mode。
 #text_menu=0
 
-# Resolution the graphical menu renders at:
-#   WxH      e.g. 1920x1080 - switch to that exact GOP mode if available
-#   max      use the highest resolution the firmware offers
-#   native   (or absent) keep the firmware's current/native mode (default)
-# If the requested WxH is not in the firmware's mode list, the current mode is
-# kept. Has no effect in text mode.
+# 图形菜单的渲染分辨率：
+#   WxH     例如 1920x1080，存在对应 GOP 模式时切换到该分辨率。
+#   max     使用固件提供的最高分辨率。
+#   native  或不设置：保持固件当前／原生模式（默认值）。
+# 如果固件模式列表没有指定的 WxH，则保留当前模式。文本菜单不受影响。
 #resolution=native
 
-# Menu title shown at the top.
-#   (absent / empty) -> the default title "Visor"
-#   none             -> no title at all
-#   anything else    -> shown verbatim
+# 菜单顶部标题：
+#   不设置／留空   使用默认标题“Visor”。
+#   none          不显示标题。
+#   其他内容      原样显示。
 #title=My Rig
 
-# Graphical menu - show the name label under each icon. 0 = icons only.
-# An auto-detected menu defaults to icons-only unless you set this. (alias: names)
+# 图形菜单中是否在图标下方显示名称，0 = 只显示图标。
+# 自动检测得到的菜单默认只显示图标，除非显式设置本项。别名：names。
 #show_names=1
 
-# Graphical menu - show details for the selected entry near the bottom of the
-# screen. When show_names=1 this is path-only; when show_names=0 it shows the
-# name above the path. (alias: centre_info)
+# 在屏幕下方显示当前项的详细信息。show_names=1 时只显示路径；
+# show_names=0 时在路径上方显示名称。别名：centre_info。
 #center_info=0
 
-# How many entries fit on one page. When more exist, chevrons appear and paging
-# cross-fades at anim_speed. Default 3.
+# 每页显示的启动项数量，默认 3。超出时显示翻页箭头，
+# 翻页使用 anim_speed 设置的速度交叉淡入淡出。
 #entries_per_page=3
 
-# Corner radius (in pixels) of the selection highlight / frost box. 0 = built-in
-# default. Larger = rounder; small values = squarer corners. (alias: corner_radius)
+# 选中高亮框／毛玻璃面板的圆角半径，单位像素。0 = 内置默认值。
+# 数值越大越圆，数值越小越接近直角。别名：corner_radius。
 #box_radius=14
 
-# Mouse / touchpad / touchscreen support in the graphical menu. A cursor appears
-# when a pointer device is present; a single click on an icon boots it, and clicks
-# on the power icons trigger them. 1 = on (default), 0 = off. (alias: pointer)
+# 图形菜单的鼠标、触控板和触摸屏支持。有指针设备时显示光标，
+# 单击图标启动对应系统，单击电源图标执行对应动作。
+# 1 = 启用（默认值），0 = 关闭。别名：pointer。
 #mouse=1
 
-# Relative mouse/touchpad movement multiplier. 1 = slowest, 20 = fastest,
-# 4 = default. Absolute touchscreens are mapped directly and ignore this key.
-# Alias: pointer_speed.
+# 相对定位鼠标／触控板的移动速度倍率，1 最慢，20 最快，默认 4。
+# 绝对定位触摸屏直接映射坐标，忽略本项。别名：pointer_speed。
 #mouse_speed=4
 
-# Replace the built-in white arrow with your own cursor image. Takes a PNG or
-# BMP; a bare name resolves under \EFI\visor\. "default" (or "arrow") keeps the
-# built-in one. Use a square image with a transparent background - it is scaled
-# to a single square size, so a non-square source gets squashed. Setting this
-# from a theme file works too, so a theme can ship its own pointer.
-# Alias: cursor_image.
+# 使用自定义光标替换内置白色箭头，支持 PNG 或 BMP。
+# 只有文件名时，从 \EFI\visor\ 下查找。default 或 arrow 表示使用内置箭头。
+# 建议使用透明背景的正方形图片：图片会被缩放为正方形，非正方形源图会被挤压。
+# 也可以在主题配置中设置，让主题自带光标。别名：cursor_image。
 #cursor=cursors/breeze.png
 
-# Rendered edge length of the cursor image in pixels. 0 = use the image's own
-# width. Clamped to 8-128. Has no effect on the built-in arrow.
+# 自定义光标渲染后的边长，单位像素。0 = 使用原图宽度，范围限制在 8–128。
+# 对内置箭头无效。
 #cursor_size=24
 
-# Which pixel of the image is the actual pointer - the one a click lands on,
-# and the one the arrow's tip would be. "X,Y" in image pixels measured from the
-# top-left after cursor_size scaling, or "center" for the middle (what a
-# crosshair wants), or "topleft"/"tip" for the corner. Default is 0,0.
+# 光标图片的点击热点，即实际点击落点，相当于箭头的尖端。
+# 使用 X,Y 指定 cursor_size 缩放后从左上角计算的像素坐标；
+# center 表示中心（适合十字准星），topleft 或 tip 表示左上角，默认 0,0。
 #cursor_hotspot=0,0
 
-# Text font. Currently only "jetbrains" is bundled. Empty = default.
+# 文字字体。目前只附带 jetbrains，留空使用默认字体。
 #font=jetbrains
 
 
-# --- Diagnostics ------------------------------------------------------------
+# --- 诊断 -------------------------------------------------------------------
 
-# Write diagnostics to \EFI\visor\boot.log. Logging is append-only; the file is
-# trimmed to the last few sessions only once it grows past ~128 KiB, and only
-# after the config is parsed, so a boot that hangs early never destroys the
-# previous boot's log. Set this to 0 if Visor stops after "Visor loading..." on
-# firmware with a broken ESP write path. This key is read before any log write.
-# Aliases: boot_log, file_log. Inverse alias: no_log=1.
+# 将诊断信息写入 \EFI\visor\boot.log。日志只追加；超过约 128 KiB 时才保留
+# 最近几次启动记录，而且只在配置解析后裁剪，因此早期启动卡住不会破坏上次日志。
+# 如果固件的 ESP 写入有问题，Visor 停在“Visor loading...”处，可设为 0。
+# 本项在任何日志写入前读取。别名：boot_log、file_log；反向别名：no_log=1。
 #log=1
 
 
-# --- Logo --------------------------------------------------------------------
-# An image drawn in the header, next to the title or on its own. The bundled
-# Visor logo (\EFI\visor\logo.png) is used by default, so you get one without
-# configuring anything. PNG or BMP; transparency is respected, and a square
-# image looks best (it is scaled to a square).
-#   (absent / default) -> the bundled logo
-#   none / off         -> no logo, title only
-#   <path>             -> your own image, e.g. \EFI\visor\mylogo.png
+# --- 标志图案 ---------------------------------------------------------------
+# 在标题旁边或单独显示的图片。默认使用附带的 \EFI\visor\logo.png，
+# 无需配置即可显示。支持 PNG 或 BMP 及透明通道；图片会缩放成正方形，
+# 因此建议使用正方形图片。
+#   不设置／default   使用附带的标志。
+#   none / off        不显示标志，只显示标题。
+#   <path>            自定义图片，例如 \EFI\visor\mylogo.png。
 #logo=\EFI\visor\logo.png
 #
-# How the logo and the title share the header:
-#   title  logo to the left of the title, vertically centred (default)
-#   only   logo alone - the title text is not drawn
-#   above  logo centred above the title
-#   none   no logo (same as logo=none)
+# 标志和标题在页眉中的排列方式：
+#   title  标志位于标题左侧，垂直居中（默认值）。
+#   only   只显示标志，不绘制标题文字。
+#   above  标志在标题上方居中。
+#   none   不显示标志，等同于 logo=none。
 #logo_mode=title
 #
-# Logo edge length in pixels. 0 / absent scales with the title: 1.5x the title
-# height beside it, 2x when standalone or stacked. Capped so the header can
-# never grow into the entry row.
+# 标志边长，单位像素。0 或不设置时随标题大小缩放：
+# 位于标题旁边时为标题高度的 1.5 倍；单独显示或上下排列时为 2 倍。
+# 大小会受限制，避免页眉侵入启动项所在行。
 #logo_size=96
 #
-# Space between logo and title in pixels. Default is half the title height.
+# 标志和标题之间的间距，单位像素，默认为标题高度的一半。
 #logo_gap=24
-# (The logo's color lives with the accent keys at the bottom: accent_logo.)
+# 标志颜色由下方动态配色中的 accent_logo 设置。
 
-# --- Themes -----------------------------------------------------------------
-# If set, Visor loads \EFI\visor\themes\<name>.conf and the UI values in
-# that file OVERRIDE the ones below. A theme file may contain any of the UI keys
-# in this file (colors, sizes, icons, underline, power, background, title, logo...).
-# Boot entries always stay here in boot.conf - themes are UI-only.
-#   <name>   load \EFI\visor\themes\<name>.conf
-#   random   pick a random theme from \EFI\visor\themes\ on each boot
-#   cycle    advance to the next theme each boot (position saved in NVRAM)
+# --- 主题 -------------------------------------------------------------------
+# 设置后加载 \EFI\visor\themes\<name>.conf，其中的界面设置覆盖本文件下方的值。
+# 主题可以包含本文件的任意界面键，例如颜色、尺寸、图标、下划线、电源、背景、
+# 标题和标志。启动项始终保留在 boot.conf 中，主题只负责界面样式。
+#   <name>  加载 \EFI\visor\themes\<name>.conf。
+#   random  每次启动从 \EFI\visor\themes\ 随机选择主题。
+#   cycle   每次启动切换到下一个主题，当前位置保存在 NVRAM。
 #theme=nord
 
-# --- Colors -----------------------------------------------------------------
-# Every key that sets a color or an accent takes the same four kinds of value:
-#   0 / off     leave this element alone - its plain color, no accent
-#   1 / on      accent this element with the role it uses by default
-#   <role>      accent it with a specific role of the wallpaper palette:
-#                 primary, on_primary, primary_container, on_primary_container,
-#                 secondary, tertiary, tertiary_container, surface,
-#                 surface_container, on_surface, on_surface_variant, outline
-#   #RRGGBB     an explicit color, which needs no wallpaper and always wins
-# So title_color=#7AA2F7, title_color=tertiary and title_color=0 are all valid.
-# A role only does something when accent=1 and the wallpaper yields a palette;
-# an explicit color works regardless. More specific beats less specific:
-# a per-element key (title_color) beats its group (accent_text) beats accent=.
+# --- 颜色 -------------------------------------------------------------------
+# 所有颜色和强调色配置都接受以下四类值：
+#   0 / off    不为该元素应用强调色，保留其普通颜色。
+#   1 / on     按该元素默认的配色角色设置强调色。
+#   <role>     使用背景调色板中指定的角色：
+#                primary, on_primary, primary_container, on_primary_container,
+#                secondary, tertiary, tertiary_container, surface,
+#                surface_container, on_surface, on_surface_variant, outline
+#   #RRGGBB    明确指定颜色，无需背景图片，且优先级最高。
+# 因此 title_color=#7AA2F7、title_color=tertiary 和 title_color=0 都有效。
+# 角色配色需要 accent=1 且背景能生成调色板；明确指定颜色不受此限制。
+# 越具体的设置优先级越高：单个元素（title_color）优先于分组（accent_text），
+# 分组又优先于 accent=。
 #
-# Title text color.
+# 标题文字颜色。
 #title_color=#7AA2F7
-# Default color for every entry's name (per-entry "color=" overrides this).
+# 所有启动项名称的默认颜色，可由单个启动项内的 color= 覆盖。
 #name_color=#C0CAF5
-# Accent color of the selection highlight / underline.
+# 选中高亮框／下划线的强调色。
 #highlight_color=#7AA2F7
-# Countdown, hints and other dim labels.
+# 倒计时、操作提示及其他弱化文字的颜色。
 #info_color=on_surface_variant
-# Menu background fill, used when no background image is set.
-# Alias: background_color.
+# 未设置背景图片时的菜单底色。别名：background_color。
 #bg_color=#1A1A2E
 
-# --- Blur highlight ---------------------------------------------------------
-# Replace the flat selection card with a blurred-glass panel that follows the
-# selection (entries AND power actions), with softly feathered edges.
-#   blur        = 0       off (flat card)
-#               = 1       frosted glass (blur + light tint)
-#               = clear   clear glass (blur only, no tint)
-#   blur_title  = 1       blurred panel behind the title (static)
-#   blur_color  = #RRGGBB tint colour for frosted mode (default white)
-# The panel blurs the background image, so it looks best over a detailed
-# background. With no background it falls back to a translucent tint.
+# --- 模糊高亮 ---------------------------------------------------------------
+# 将普通选中卡片改为边缘柔和的玻璃面板，跟随启动项和电源操作的选中位置。
+#   blur        = 0        关闭，使用普通卡片。
+#               = 1        毛玻璃：背景模糊加浅色着色。
+#               = clear    透明玻璃：只模糊，不着色。
+#   blur_title  = 1        标题后显示固定的模糊面板。
+#   blur_color  = #RRGGBB  毛玻璃模式的着色，默认白色。
+# 面板会模糊背景图片，细节丰富的背景效果更好；没有图片时回退为半透明着色。
 #blur=clear
 #blur_title=1
 #blur_color=#FFFFFF
 
-# --- Animation --------------------------------------------------------------
-# Master switch for all GUI animations and fades. 1 = on (default), 0 = instant
-# UI state changes with no intro/outro fade, cross-fade, or selection slide.
+# --- 动画 -------------------------------------------------------------------
+# 所有图形界面动画和渐变的总开关，1 = 启用（默认值）。
+# 0 = 界面状态立即变化，不使用入场／退场渐变、交叉淡入淡出或选中滑动动画。
 #animation=1
 
-# Selection animation speed, 1 (slow) .. 10 (fast). Default 8. Switching
-# between an entry and a power action cross-fades; moving within a row/column
-# slides. Same speed for both. Ignored when animation=0.
+# 选中动画速度，1 最慢，10 最快，默认 8。
+# 启动项与电源操作之间使用交叉渐变；同一行／列内使用滑动，两者共用此速度。
+# animation=0 时忽略。
 #anim_speed=8
 
-# Full-screen fade speed for menu fade-in and boot/power fade-out, 1 (slow) ..
-# 10 (fast). Default 10. Ignored when animation=0.
+# 菜单入场和启动／电源操作退场时的全屏渐变速度，1 最慢，10 最快，默认 10。
+# animation=0 时忽略。
 #fade_speed=10
 
-# --- Font sizes (in pixels; 0 / absent = sensible default) ------------------
-# Title height. Default scales with the screen (~ screen_height / 12).
+# --- 字号（单位像素；0 或不设置表示使用默认值）-------------------------------
+# 标题高度，默认随屏幕缩放，约为屏幕高度的 1/12。
 #title_size=120
-# Entry-name height. Default is 16.
+# 启动项名称高度，默认 16。
 #name_size=28
 
-# --- Icons (all in pixels; 0 / absent = sensible default) -------------------
-# Icon edge length (icons are square). Default 64. This is the GLOBAL default;
-# an individual entry can override it with its own "icon_size =" (see below).
+# --- 图标（单位像素；0 或不设置表示使用默认值）-------------------------------
+# 图标边长，图标为正方形，默认 64。这是全局默认值，
+# 单个启动项可以使用自己的 icon_size= 覆盖，见下文。
 #icon_size=128
-# Horizontal gap between icons. Default 60.
+# 图标水平间距，默认 60。
 #icon_spacing=80
-# Vertical center of the icon row. Default = middle of the screen.
-# Icons of different sizes are centered on this line; their labels share one
-# baseline below the tallest icon.
+# 图标行的垂直中心位置，默认为屏幕中央。
+# 不同尺寸的图标沿此线居中，名称在最高图标下方使用相同的文字基线。
 #icon_y=560
 
-# --- Selection underline (the accent bar under the selected entry) ----------
-# Color. Defaults to highlight_color if not set.
+# --- 选中下划线（选中启动项下方的强调色条）-----------------------------------
+# 颜色，未设置时使用 highlight_color。
 #underline_color=#7AA2F7
-# Thickness (height) in pixels. Default 4.
+# 厚度（高度），单位像素，默认 4。
 #underline_thickness=6
-# Length (width) in pixels. Default = icon width + a small margin.
+# 长度（宽度），单位像素，默认为图标宽度加少量边距。
 #underline_length=180
 
-# --- Power actions (Shutdown / Reboot / Firmware) ---------------------------
-# Which corner the three actions are stacked in:
-#   bottomright (default) | bottomleft | topright | topleft
+# --- 电源操作（关机／重启／固件设置）-----------------------------------------
+# 三个操作竖排所在的角落：
+#   bottomright（默认，右下）| bottomleft（左下）| topright（右上）| topleft（左上）
 #power_position=bottomright
-# Color of each action's accent (its first letter / hotkey). Each defaults to
-# highlight_color if not set.
+# 各动作的强调色，用于首字母／快捷键，未设置时使用 highlight_color。
 #shutdown_color=#F7768E
 #reboot_color=#E0AF68
 #firmware_color=#9ECE6A
 #
-# Show the three actions as icons instead of text. They are still
-# triggered by the S / R / F keys. Set power_icons=1 and give a PNG for each.
-# Any action without a loaded icon falls back to its text label, so a partial
-# set is fine. power_icon_size is the icon edge length in px (default 40).
+# 使用图标替代三个动作的文字，仍可使用 S / R / F 快捷键。
+# 设置 power_icons=1，并为每个动作提供 PNG。
+# 没有成功加载图标的动作回退到文字，因此可以只设置一部分图标。
+# power_icon_size 表示图标边长，单位像素，默认 40。
 #power_icons=1
 #power_icon_size=44
 #shutdown_icon=\EFI\visor\icons\power_shutdown.png
 #reboot_icon=\EFI\visor\icons\power_reboot.png
 #firmware_icon=\EFI\visor\icons\power_firmware.png
 
-# --- Background -------------------------------------------------------------
-# Full-screen background image (PNG, BMP, GIF or MP4). Omit for a solid
-# backdrop. Animated GIFs and MJPEG MP4s play in a loop; the accent palette
-# is taken from the first frame.
+# --- 背景 -------------------------------------------------------------------
+# 全屏背景图片，支持 PNG、BMP、GIF 或 MP4；不设置时使用纯色背景。
+# 动态 GIF 和 MJPEG 编码的 MP4 循环播放，强调色调色板取自第一帧。
 background=\EFI\visor\backgrounds\default.png
 
-# --- Boot intro --------------------------------------------------------------
-# An optional clip or still shown once before the menu. Unset by default, and
-# inert until intro_media names a file - so adding these keys changes nothing
-# until you point one at real media.
+# --- 开场画面 ---------------------------------------------------------------
+# 在菜单前播放一次的可选视频或静态图片，默认不设置。
+# 只有 intro_media 指向真实文件时才生效，仅添加其他配置不会启用开场画面。
 #
-# Formats: PNG and BMP always work. GIF needs the anim_gif feature, MP4/MOV/
-# M4V (MJPEG only, not H.264) and VBG need anim_mp4. A file this build cannot
-# decode is skipped and the menu opens normally; it never fails the boot.
+# 格式：PNG、BMP 始终可用；GIF 需要 anim_gif 功能；
+# MP4/MOV/M4V（仅 MJPEG，不支持 H.264）和 VBG 需要 anim_mp4 功能。
+# 当前构建无法解码的文件会被跳过，正常进入菜单，不会导致启动失败。
 #intro_media=\EFI\visor\backgrounds\default.png
 #
-# Milliseconds until the intro hands over on its own, measured from the first
-# frame: loading and decoding a clip happen before the clock starts. Clamped
-# to 5000. Zero turns the intro off, even in manual mode.
+# 从第一帧开始计算，自动结束开场画面的时间，单位毫秒，最大 5000。
+# 视频加载和解码发生在计时开始之前。0 = 关闭开场画面，即使在手动模式下也是如此。
 #intro_duration=2000
 #
-# Repeat the clip no matter what loop count the file carries. In automatic
-# mode the intro still ends at intro_duration.
+# 无论文件自身指定多少次循环，都重复播放。
+# 自动模式下仍会在 intro_duration 到期时结束。
 #intro_loop=0
 #
-# When 0, the intro waits for a key instead of continuing by itself, and
-# intro_duration stops being a deadline. A non-looping clip then holds its
-# last frame. Any key skips the intro and opens the menu.
+# 0 = 等待按键后继续，不自动结束，intro_duration 不再作为结束时限。
+# 此时不循环的视频播放完后停留在最后一帧。任意键跳过开场画面并打开菜单。
 #intro_auto_continue=1
 #
-# Where a completed automatic intro leads: "menu" (default) opens the chooser
-# with timeout still counting, "boot" boots the already-selected entry without
-# showing it. A key always opens the menu, even with intro_action=boot.
+# 自动播放完成后的动作：menu（默认值）打开菜单并继续倒计时；
+# boot 直接启动已经选中的项，不显示菜单。
+# 即使设置 intro_action=boot，按键也始终会打开菜单。
 #
-# intro_image is an alias for intro_media. Keep autoboot=0 and timeout
-# nonzero or the intro is bypassed entirely - there would be no menu to skip
-# to. animation=0 shows the first frame without motion or fade.
+# intro_image 是 intro_media 的别名。
+# 请保持 autoboot=0 且 timeout 不为零，否则菜单本身被跳过，开场画面也不会显示。
+# animation=0 时只显示第一帧，不播放动画或渐变。
 #intro_action=menu
 
-# --- Dynamic accent (palette from wallpaper) --------------------------------
-# Derive a Material You palette from the background image and apply it to the
-# UI - the same pipeline the caelestia shell uses for the desktop: the
-# wallpaper is quantized (Wu box-cut, 128 colors), a seed color is picked with
-# Material's "Score" algorithm (hue-population x chroma scoring), and the full
-# set of Material dynamic-color roles (primary/secondary/tertiary, surface
-# tones, onSurface text tones, outline) is generated from it for a dark scheme.
-# Elements each get their own role, like a themed desktop app:
-#   primary            selection underline + highlight ("the" accent)
-#   secondary          shutdown / reboot power actions
-#   tertiary           firmware power action (companion accent hue)
-#   onSurface          entry names       (accent_text=1)
-#   onSurfaceVariant   countdown, hints, dim labels
-#   surface            fallback background tint; onPrimaryContainer frost tint
-# Needs a background image; with a solid backdrop it does nothing and the
-# configured colors are kept.
-#   accent            master switch (default 0 = off).
-# All of these take the same values as the color keys above - 0, 1, a role
-# name, or #RRGGBB - so each group can be pointed at a different role:
-#   accent_underline  underline + highlight use primary    (default 1)
-#   accent_icons      power icons/labels use sec/tertiary  (default 1)
-#   accent_text       title/names/dim text use the on* roles (default 0)
-#   accent_os_icons   flatten the per-OS icons to the primary color too
-#                     (default 0; discards brand colors like Ubuntu orange).
-#   accent_logo       tint the logo instead of drawing its own colors, good
-#                     for single-color logos like the bundled one. Defaults to
-#                     whatever accent_text is. Aliases: logo_color.
-#   accent_variant    scheme variant, same names as caelestia. One of:
-#                       tonal       balanced and subtle (caelestia's default)
-#                       neutral     nearly grey, the most restrained
-#                       content     chroma follows the wallpaper's own
-#                       fidelity    like content, stays true to a vivid seed
-#                       vibrant     stronger, more colourful
-#                       expressive  vivid, with a large hue shift between roles
-#                       monochrome  greyscale, no hue
-# Giving accent= itself a role or color makes that the default for every
-# element that has no key of its own. A per-element key always wins, so
-# "accent=1" with "underline_color=#F7768E" keeps that underline red.
+# --- 动态配色（从背景生成调色板）---------------------------------------------
+# 从背景生成 Material You 调色板并用于界面，流程与 caelestia 桌面 shell 相同：
+# 先用 Wu 分割算法将背景量化为 128 色，再用 Material 的 Score 算法
+# （色相占比乘以彩度评分）选择种子色，生成深色方案下的全部 Material 动态颜色角色，
+# 包括 primary/secondary/tertiary、surface 色调、onSurface 文字色及 outline。
+# 各元素使用自己的角色，类似应用主题后的桌面程序：
+#   primary           选中下划线和高亮，即主要强调色。
+#   secondary         关机／重启动作。
+#   tertiary          固件设置动作，使用搭配的强调色相。
+#   onSurface         启动项名称（accent_text=1）。
+#   onSurfaceVariant  倒计时、操作提示和弱化文字。
+#   surface           回退背景着色；毛玻璃着色使用 onPrimaryContainer。
+# 需要背景图片；纯色背景下不生效，保留手动配置的颜色。
+#   accent            总开关，默认 0，即关闭。
+# 以下各项都接受前述颜色语法：0、1、角色名或 #RRGGBB，
+# 因而每一组都可以指定不同的配色角色：
+#   accent_underline  下划线和高亮使用 primary，默认 1。
+#   accent_icons      电源图标／文字使用 secondary/tertiary，默认 1。
+#   accent_text       标题、名称和弱化文字使用 on* 角色，默认 0。
+#   accent_os_icons   将系统图标也统一为 primary 颜色，默认 0；
+#                     会丢弃原品牌颜色，例如 Ubuntu 的橙色。
+#   accent_logo       为标志重新着色，替代其原色，适合附带标志这样的单色图案。
+#                     默认跟随 accent_text。别名：logo_color。
+#   accent_variant    配色方案类型，名称与 caelestia 相同，可选：
+#                       tonal       均衡柔和，caelestia 默认值。
+#                       neutral     接近灰色，最为克制。
+#                       content     彩度跟随背景自身。
+#                       fidelity    类似 content，忠实保留鲜艳种子色。
+#                       vibrant     色彩更浓、更鲜明。
+#                       expressive  鲜艳，角色之间的色相变化更大。
+#                       monochrome  灰度，不含色相。
+# 为 accent= 本身指定角色或颜色，可作为未单独设置的元素的默认值。
+# 单个元素设置始终优先，例如 accent=1 搭配 underline_color=#F7768E，
+# 下划线仍保持红色。
 #accent=1
 #accent_underline=1
 #accent_icons=1
 #accent_text=0
 #accent_os_icons=0
-# Aliases: logo_color, accent_logo_color.
+# 别名：logo_color、accent_logo_color。
 #accent_logo=tertiary
 #accent_variant=tonal
 
-# --- Clock -------------------------------------------------------------------
-# The graphical menu can show a real-time clock. Position, format, size and
-# decoration are configurable; the time is read from the firmware RTC each
-# repaint and only its own rectangle is presented, so a tick does not force a
-# full menu redraw.
+# --- 时钟 -------------------------------------------------------------------
+# 图形菜单可以显示实时时钟，位置、格式、大小和装饰均可配置。
+# 每次重绘从固件 RTC 读取时间，只提交时钟自身的矩形区域，
+# 因此时钟跳动不会导致整个菜单重绘。
 #
-# Clock visibility and color. Both take the unified color grammar described in
-# Colors above (0/off, 1/on, a palette role, or #RRGGBB). Either key does the
-# same thing; show_clock is the historical name.
-#   clock       = 1               on, tinted from the palette (default: off)
-#               = #C0CAF5         on, explicit color (always wins)
-#               = clock           on, explicit "clock" palette role
-#               = 0               off (default)
-#   accent_clock= 1               also from the palette (default 1 when clock is on)
-#   clock_color = #7AA2F7         explicit clock text color (wins over the palette;
-#                                 when set, it still respects show_clock=1/0)
-# Aliases: show_clock is an alias for clock.
+# 时钟的显示开关和颜色都使用前述统一颜色语法：
+# 0/off、1/on、调色板角色或 #RRGGBB。clock 和 show_clock 的功能相同，
+# show_clock 是历史名称。
+#   clock       = 1          显示，使用调色板着色；默认关闭。
+#               = #C0CAF5    显示，明确指定颜色，优先于调色板。
+#               = clock      显示，明确使用名为 clock 的调色板角色。
+#               = 0          不显示（默认值）。
+#   accent_clock= 1          也使用调色板；时钟开启时默认 1。
+#   clock_color = #7AA2F7    明确指定文字颜色，优先于调色板；
+#                            设置后仍遵循 show_clock=1/0。
+# 别名：show_clock 是 clock 的别名。
 #clock=1
 #show_clock=1
 #accent_clock=1
 #clock_color=#C0CAF5
 #
-# Clock geometry and typography.
-#   clock_size      = 48          height in pixels (0 = scale with the title; alias: clock_px)
-#   clock_format    = 24h         24h (default) or 12h (with AM/PM, no leading zero)
-#   clock_seconds   = 0           also show seconds (extra detail, updates every second)
-#   clock_position  = topright    where it sits: topright | topleft | topcenter | topcentre | top |
-#                                 bottomright | bottomleft | bottomcenter | bottomcentre | bottom |
-#                                 center | centre | middle  (default topright)
-#                                 Hyphens, underscores and spaces are equivalent: "top-right",
-#                                 "top_right" and "top right" all parse the same.
-#   clock_date      = 0           also show the date under the time. Either true/false or a
-#                                 format name: long (default, "Monday, January 5"), iso
-#                                 ("2026-01-05"), dmy ("05/01/26"), mdy ("01/05/26"). Also
-#                                 accepts ymd/eu/us/full aliases and on/off.
-#   clock_date_format = long      format when the date is shown (default long). Same names
-#                                 as clock_date, but without the true/false toggle.
-#   clock_blur      = 0           frosted backing behind the clock text (default 0)
-#   clock_shadow    = 1           drop shadow for contrast (default 1)
-#   clock_sync      = 0           apply the correction the OS publishes in
-#                                 \EFI\visor\time.sync (default 0).
+# 时钟布局和文字样式：
+#   clock_size      = 48        高度，单位像素；0 表示随标题缩放，别名 clock_px。
+#   clock_format    = 24h       默认 24h；12h 使用 AM/PM，不补前导零。
+#   clock_seconds   = 0         同时显示秒数，更详细，每秒更新。
+#   clock_position  = topright  位置，默认右上，可选：
+#                               topright | topleft | topcenter | topcentre | top |
+#                               bottomright | bottomleft | bottomcenter | bottomcentre | bottom |
+#                               center | centre | middle。
+#                               连字符、下划线和空格等效，例如 top-right、
+#                               top_right 与 top right 解析结果相同。
+#   clock_date      = 0         在时间下显示日期，可用 true/false 或格式名：
+#                               long（默认，例如 Monday, January 5）、
+#                               iso（2026-01-05）、dmy（05/01/26）、mdy（01/05/26）。
+#                               也接受 ymd/eu/us/full 别名以及 on/off。
+#   clock_date_format = long    日期显示格式，默认 long，名称与 clock_date 相同，
+#                               但不能使用 true/false 开关。
+#   clock_blur      = 0         时钟文字后显示毛玻璃底板，默认 0。
+#   clock_shadow    = 1         显示投影以增强对比度，默认 1。
+#   clock_sync      = 0         应用系统写入 \EFI\visor\time.sync 的时间修正，默认 0。
 #
-# Why you might want it: the clock reads the firmware RTC and nothing else.
-# UEFI has no time sync of its own - there is no SNTP client in the spec - so
-# unless your OS writes the RTC back, the RTC free-runs on the board's
-# oscillator and the menu slowly diverges from real time while the desktop
-# hides it behind NTP. Most distros do not write the RTC: on a dual-boot
-# machine, storing local time in hardware breaks a UTC-based other OS.
+# 为什么需要修正：菜单时钟只读取固件 RTC。UEFI 没有自己的时间同步机制，
+# 规范中也没有 SNTP 客户端。如果系统不回写 RTC，它会按主板振荡器自由运行，
+# 菜单时间逐渐偏离真实时间，而桌面系统通过 NTP 掩盖了这种偏差。
+# 多数发行版不会回写 RTC，因为双系统中把本地时间写入硬件时钟会影响使用 UTC 的系统。
 #
-# 'visor time-sync --install' publishes the offset from a systemd timer and
-# turns this on. That alone fixes the menu. Add --rtc to have the timer write
-# the hardware clock too, which fixes the drift itself and with it every
-# other consumer of the RTC - the OS's own boot time, logs, TLS, cron.
+# visor time-sync --install 会通过 systemd 定时器发布时间偏差并开启此功能，
+# 足以修正菜单时间。添加 --rtc 可让定时器同时回写硬件时钟，修正漂移本身，
+# 以及其他依赖 RTC 的内容，包括系统启动时间、日志、TLS 和 cron。
 #
-# The file holds one signed integer, 'offset=<seconds>', meaning true time
-# minus what the RTC reported. It is a difference rather than a timestamp
-# because GetTime returns local time on some firmware and UTC on others and
-# nothing in pre-OS can tell which. Offsets beyond a day are ignored: that is
-# a machine whose RTC needs fixing, not a correction.
-# Aliases: clock_size <-> clock_px, clock_position <-> clock_pos, clock_sync <-> clock_ntp.
+# time.sync 内只有一个带符号整数 offset=<seconds>，表示真实时间减去 RTC 时间。
+# 使用差值而非时间戳，是因为某些固件的 GetTime 返回本地时间，另一些返回 UTC，
+# 系统启动前无法判断是哪一种。超过一天的偏差会被忽略：此时应修复 RTC 本身。
+# 别名：clock_size <-> clock_px、clock_position <-> clock_pos、clock_sync <-> clock_ntp。
 #clock_size=48
 #clock_px=48
 #clock_format=24h
@@ -548,26 +500,22 @@ background=\EFI\visor\backgrounds\default.png
 #clock_shadow=1
 #clock_sync=0
 
-# --- Screensaver -------------------------------------------------------------
-# While the graphical menu is up Visor tracks input. After a period without
-# keys, pointer moves or clicks, the UI elements fade out leaving only the
-# background (plus the clock, if enabled and kept). After a longer idle time
-# the panel blanks to black and stops rendering entirely until the next input.
-# Idle tracking is suspended while the boot countdown is running, while the
-# text editor is open (e), or while the file browser is open — those are
-# active use even without new keystrokes.
-#   screensaver        = 0        master switch (default 0 = off). A bare number
-#                                 such as "screensaver=60" means "on, with a
-#                                 60-second dim delay" (same as screensaver=1 plus
-#                                 screensaver_delay=60).
-#   screensaver_delay  = 60       seconds idle before dimming (default 60; alias:
-#                                 screensaver_timeout)
-#   screensaver_blank  = 600      seconds idle before blanking to black after the
-#                                 dim; 0 disables the blank stage (dim only, default 600;
-#                                 alias: screensaver_blank_delay)
-#   screensaver_clock  = 1        keep the clock visible while dimmed (ignored while
-#                                 blanked, default 1)
-# Aliases: screensaver_delay <-> screensaver_timeout, screensaver_blank <-> screensaver_blank_delay.
+# --- 屏幕保护 ---------------------------------------------------------------
+# 图形菜单显示期间跟踪用户输入。一段时间没有按键、指针移动或点击后，
+# 界面元素淡出，只留下背景，以及启用并设置为保留的时钟。
+# 更长时间无操作后，屏幕变黑并停止渲染，直到下一次输入。
+# 启动倒计时运行期间、文字编辑器（e）打开期间或文件浏览器打开期间暂停空闲计时，
+# 因为即使没有新按键，这些情况也属于正在使用。
+#   screensaver        = 0    总开关，默认 0，关闭。
+#                             screensaver=60 这样的数值表示启用并在空闲 60 秒后淡出，
+#                             等同于 screensaver=1 加 screensaver_delay=60。
+#   screensaver_delay  = 60   空闲后淡出的等待秒数，默认 60，别名 screensaver_timeout。
+#   screensaver_blank  = 600  淡出后进一步变黑的空闲等待秒数，默认 600；
+#                             0 表示不进入变黑阶段，只淡出。
+#                             别名 screensaver_blank_delay。
+#   screensaver_clock  = 1    淡出时保留时钟，默认 1；屏幕全黑时忽略。
+# 别名：screensaver_delay <-> screensaver_timeout、
+#       screensaver_blank <-> screensaver_blank_delay。
 #screensaver=0
 #screensaver_delay=60
 #screensaver_timeout=60
@@ -575,248 +523,203 @@ background=\EFI\visor\backgrounds\default.png
 #screensaver_blank_delay=600
 #screensaver_clock=1
 
-# --- Screenshots and screen recording ----------------------------------------
-# F6 writes a PNG screenshot of the current screen to \EFI\visor\shots.
-# F10 records an animated GIF of the menu: a 3-second countdown (F10 again
-# cancels), then the recording, then the file is written to the same folder.
-# Recordings use one global palette with per-frame deltas, are captured at
-# 20 fps, and are scaled down to at most 960 px wide so a 4K menu does not
-# produce a file nothing will open. Both work in the menu and in the disk
-# corruption warning.
-#   record_seconds   = 3          how long F10 records, in seconds (1-12,
-#                                 default 3). Longer recordings are cut short
-#                                 if they would exceed the 20 MiB encoder
-#                                 budget; whatever was captured is still saved.
+# --- 截图与录屏 -------------------------------------------------------------
+# F6 将当前屏幕保存为 PNG，位置为 \EFI\visor\shots。
+# F10 将菜单录制为动态 GIF：先倒计时 3 秒，再次按 F10 可取消；
+# 录制结束后写入同一目录。录制使用全局调色板和逐帧差分，帧率 20 fps，
+# 宽度最多缩放到 960 像素，避免 4K 菜单生成难以打开的大文件。
+# 菜单界面和磁盘损坏警告界面均可使用。
+#   record_seconds   = 3    F10 录制时长，单位秒，范围 1–12，默认 3。
+#                           超过 20 MiB 编码器预算时提前结束，仍保存已录制部分。
 #record_seconds=3
 #
-# Whole-boot recording (recboot feature, needs to be compiled in):
-#   Record the entire boot sequence — fade-in, menu, boot sound, fade-out —
-#   to a single MJPEG+PCM AVI in \EFI\visor\shots\. To arm it, drop an empty
-#   file called  rec.arm  (or  rec.arm.conf  with overrides) on the ESP at:
+# 整个启动过程录制，需要编译时启用 recboot 功能：
+#   将入场、菜单、启动音效和退场录制为一个 MJPEG+PCM AVI，放入
+#   \EFI\visor\shots\。在 ESP 上创建空文件 rec.arm，
+#   或包含覆盖参数的 rec.arm.conf，位置为：
 #     \EFI\visor\rec.arm
-#   Visor deletes the marker as it starts, so it records exactly one boot and
-#   there is nothing to switch off afterwards.  Without the audio feature the
-#   video is silent.
+#   Visor 开始录制时删除此标记，因此只录制下一次启动，无需事后手动关闭。
+#   未启用 audio 功能时，视频不含声音。
 #
-#   Optional overrides inside rec.arm (one key=value per line, same syntax
-#   as boot.conf):
-#     fps       = 20     frames per second (default 20; min 5, max 30)
-#     width     = 960    max width in pixels, aspect preserved (default 960;
-#                        min 160, max 1920)
-#     quality   = 80     JPEG quality 20-100 (default 80)
+#   rec.arm 内可选的覆盖参数，每行 key=value，语法与 boot.conf 相同：
+#     fps       = 20    帧率，默认 20，最小 5，最大 30。
+#     width     = 960   最大宽度，保持宽高比；默认 960，最小 160，最大 1920。
+#     quality   = 80    JPEG 质量，范围 20–100，默认 80。
 #
-#   To record: create the marker, reboot.  The file appears as
+#   创建标记后重启即可录制，生成文件：
 #     \EFI\visor\shots\boot_<HHMMSS>.avi
-#   and can be played back with any standard video player (VLC, mpv, ffplay).
+#   可用 VLC、mpv、ffplay 等常见播放器播放。
 
-# --- TPM2 measured boot ------------------------------------------------------
-# Measure boot artifacts into the TPM2 so a sealed disk or remote-attestation
-# policy can tell what Visor booted. Both measurements use the TCG2
-# HashLogExtendEvent protocol. When no TPM is present Visor logs and continues.
-#   tpm              = 1          master switch (default 1 = on when a TPM is
-#                                 present; alias: measure)
-#   tpm_pcr_config   = 5          PCR for the config file as it sits on disk
-#                                 (the raw boot.conf bytes; 0-23, default 5)
-#   tpm_pcr_cmdline  = 12         PCR for the kernel command line (the LoadOptions
-#                                 string including its terminating NUL, matching
-#                                 systemd's tpm_log_load_options layout so a
-#                                 sealed PCR 12 policy stays portable; 0-23,
-#                                 default 12)
-# Both PCRs publish their active bank list via the Boot Loader Interface variable
-# LoaderTpm2ActivePcrBanks when loader_vars is on. The TPM2 feature is advertised
-# in LoaderFeatures.  Alias: measure is an alias for tpm.
+# --- TPM2 度量启动 ----------------------------------------------------------
+# 将启动相关内容度量到 TPM2，让密封磁盘或远程证明策略能够判断 Visor 启动了什么。
+# 两类度量都使用 TCG2 HashLogExtendEvent 协议；没有 TPM 时记录日志并继续。
+#   tpm              = 1    总开关，默认 1，即存在 TPM 时启用；别名 measure。
+#   tpm_pcr_config   = 5    配置文件原始字节（磁盘上的 boot.conf）使用的 PCR，
+#                           范围 0–23，默认 5。
+#   tpm_pcr_cmdline  = 12   内核命令行使用的 PCR，度量包含结尾 NUL 的 LoadOptions，
+#                           与 systemd 的 tpm_log_load_options 布局一致，
+#                           使密封 PCR 12 策略保持可移植；范围 0–23，默认 12。
+# loader_vars 启用时，两类 PCR 的活动算法组（bank）列表通过 Boot Loader Interface 变量
+# LoaderTpm2ActivePcrBanks 发布。LoaderFeatures 也会声明 TPM2 功能。
+# 别名：measure 是 tpm 的别名。
 #tpm=1
 #measure=1
 #tpm_pcr_config=5
 #tpm_pcr_cmdline=12
 
-# --- Sound -------------------------------------------------------------------
-# Visor can play a .wav at startup while the menu initialises. The sound is
-# upsampled and played once through the built-in HDA controller; sounds longer
-# than 4 seconds are truncated at 4.
-#   menu_sound        = path      .wav played once at startup (on by default,
-#                                 but only plays when a path is set;
-#                                 off / 0 / n / f = silent)
-#   menu_sound_volume = 0-100     playback level as a percentage of the recorded
-#                                 volume (default 100 = unchanged). Applied by
-#                                 scaling the samples, so it is independent of
-#                                 the firmware mixer; 0 is silent and values
-#                                 above 100 clamp to 100 - never amplified.
+# --- 声音 -------------------------------------------------------------------
+# Visor 可在菜单初始化时通过内置 HDA 控制器播放一次 .wav 启动音效，
+# 音频会进行上采样，超过 4 秒的部分截断为 4 秒。
+#   menu_sound        = path   启动时播放的 .wav 路径，默认启用，但必须指定路径才播放；
+#                              off / 0 / n / f 表示静音。
+#   menu_sound_volume = 0-100  相对原始录音音量的百分比，默认 100，保持不变。
+#                              通过缩放采样值实现，不依赖固件混音器；0 为静音，
+#                              大于 100 时限制到 100，不放大原始音量。
 #menu_sound=\EFI\visor\bootsound.wav
 #menu_sound_volume=60
 
-# --- Boot Loader Interface (systemd) -----------------------------------------
-# Visor can export and honor the systemd Boot Loader Interface EFI variables so
-# OS tooling (bootctl, systemd, composers pinning a default entry) interoperates
-# with it. Variables live under vendor GUID 4a67b082-0a4c-41cf-b6c7-440b29bb8c4f.
-#   loader_vars      = 1          master switch (default 1 = on; alias:
-#                                 loader_interface)
-# When on, Visor:
-#   * exports LoaderInfo ("Visor <version>"), LoaderFirmwareInfo/Type
-#     (firmware vendor/type strings derived from the system table), and
-#     LoaderDevicePartUUID (the partition UUID of the ESP it booted from) if the
-#     firmware has not already published them.
-#   * exports LoaderImageIdentifier (the device path it was launched from) and
-#     LoaderFeatures (bits for ConfigTimeout, EntryDefault/OneShot, MenuDisabled,
-#     etc., plus TPM2 banks when a TPM is active).
-#   * captures LoaderTimeInitUSec at the earliest point in efi_main and
-#     LoaderTimeMenuUSec when the menu first becomes interactive.
-#   * exports LoaderEntries (the ordered list of menu entry identifiers, in
-#     on-screen order) and, just before handing off, LoaderEntrySelected plus
-#     LoaderTimeExecUSec.
-#   * respects LoaderConfigTimeout / LoaderConfigTimeoutOneShot (menu timeout
-#     overrides, with the OneShot consumed as it is read), and
-#     LoaderEntryDefault / LoaderEntryOneShot (preselecting an entry by its
-#     canonical id - the BLS .conf basename when present, otherwise a
-#     slugified display name - with the OneShot also autobooting and being
-#     consumed; the strongest override wins and remember_last is consulted only
-#     when none matched).
-#   * exports LoaderTpm2ActivePcrBanks (hex mask) when TPM is active.
-# 0 disables all of the above. For an OS agent the OneShot variables are the
-# one-boot mechanism: write LoaderEntryOneShot with an entry id and Visor boots
-# it immediately this once, then deletes the variable; ditto for
-# LoaderConfigTimeoutOneShot and the countdown.
+# --- Boot Loader Interface（systemd 启动加载器接口）---------------------------
+# Visor 可发布并遵循 systemd Boot Loader Interface 的 EFI 变量，
+# 与 bootctl、systemd 及固定默认启动项的系统制作工具互操作。
+# 变量使用厂商 GUID：4a67b082-0a4c-41cf-b6c7-440b29bb8c4f。
+#   loader_vars = 1    总开关，默认 1，启用；别名 loader_interface。
+# 启用后，Visor 会：
+#   * 当固件尚未发布时，发布 LoaderInfo（Visor <version>）、
+#     LoaderFirmwareInfo/Type（从系统表取得的固件厂商／类型），
+#     以及 LoaderDevicePartUUID（启动所在 ESP 的分区 UUID）。
+#   * 发布 LoaderImageIdentifier（自身启动的设备路径）和 LoaderFeatures，
+#     后者含 ConfigTimeout、EntryDefault/OneShot、MenuDisabled 等功能位，
+#     TPM 启用时还包含 TPM2 算法组信息。
+#   * 在 efi_main 尽早记录 LoaderTimeInitUSec，菜单首次可交互时记录 LoaderTimeMenuUSec。
+#   * 按屏幕顺序发布 LoaderEntries（菜单项标识符列表），
+#     交接前发布 LoaderEntrySelected 和 LoaderTimeExecUSec。
+#   * 遵循 LoaderConfigTimeout / LoaderConfigTimeoutOneShot 的倒计时覆盖，
+#     OneShot 在读取后消耗；也遵循 LoaderEntryDefault / LoaderEntryOneShot，
+#     使用规范标识符预选启动项：有 BLS .conf 时使用其基本文件名，否则使用
+#     显示名称生成的规范短名称。OneShot 会直接自动启动并在读取后消耗。
+#     最强的覆盖项优先，仅在没有覆盖匹配时才使用 remember_last。
+#   * TPM 启用时发布 LoaderTpm2ActivePcrBanks 十六进制掩码。
+# 0 = 禁用以上全部行为。系统代理程序可通过 OneShot 变量指定仅下一次启动的行为：
+# 写入 LoaderEntryOneShot=<启动项标识符> 后，Visor 立即启动该项一次，再删除该变量；
+# LoaderConfigTimeoutOneShot 对倒计时也采用同样的一次性机制。
 #loader_vars=1
 #loader_interface=1
 
-# --- Snapshots (boot into btrfs snapshots) ----------------------------------
-# Two sources, in priority order:
+# --- 快照（从 btrfs 快照启动）-----------------------------------------------
+# 按优先级使用以下两个来源：
 #
-# 1. Manifest (recommended): a Linux-side hook mirrors the snapshot list to
-#    the ESP:  \EFI\visor\snapshots.conf  (see tools/visor-snapshot-sync; run
-#    it from a pacman hook or a systemd path unit watching /.snapshots).
-#    The manifest format is snapshot-manager agnostic: each block only needs
-#    an id, a target entry and a complete cmdline. The bundled sync helper uses
-#    Snapper when available and otherwise understands a plain /.snapshots
-#    Snapper-style directory; Timeshift or custom tools can generate the same
-#    manifest format directly. Works on any firmware.
+# 1. 清单（推荐）：由 Linux 侧钩子将快照列表同步到 ESP 的
+#    \EFI\visor\snapshots.conf。参见 tools/visor-snapshot-sync，
+#    可从 pacman 钩子或监视 /.snapshots 的 systemd path 单元运行。
+#    清单格式不依赖具体快照管理器，每个块只需要 id、目标启动项和完整命令行。
+#    附带的同步助手优先使用 Snapper，否则识别普通 /.snapshots 下的 Snapper 风格目录；
+#    Timeshift 或自定义工具也可以直接生成相同格式。此方式适用于任意固件。
 #
-#    Target an entry with  entry = <exact menu name>  (preferred; os = <text>
-#    stays as a fuzzy fallback). The file is \EFI\visor\snapshots.conf - plural;
-#    the singular snapshot.conf is accepted but logs a warning.
+#    推荐用 entry = <菜单项完整名称> 关联目标；os = <text> 仍可作为模糊匹配的回退。
+#    文件名为复数形式 snapshots.conf；单数 snapshot.conf 也接受，但会记录警告。
 #
-# 2. Auto-detect (zero-config fallback): when no manifest exists and a btrfs
-#    EFI driver is loaded from \EFI\visor\drivers ('visor drivers' installs
-#    one), Visor detects snapshots itself, trying in order:
-#      - snapper:   <root-subvol>/.snapshots/N/snapshot, the root subvol
-#                   taken from the entry's rootflags=subvol= (@, root,
-#                   @rootfs, custom...), else top level / @ (openSUSE-style
-#                   default-subvol setups); date/desc from info.xml
-#      - Timeshift: timeshift-btrfs/snapshots/<tag>/@ (btrfs mode only);
-#                   date from the tag, desc from info.json
-#      - plain:     subvolumes under /.snapshots, /snapshots or /@snapshots
-#    Each cmdline is the entry's own cmdline with rootflags=subvol=...
-#    rewritten to the snapshot path (other rootflags kept). Needs exactly
-#    one Linux entry with a root= cmdline (multi-distro setups should use
-#    the manifest), newest 12 snapshots, booted with the entry's current
-#    kernel.
+# 2. 自动检测（零配置回退）：没有清单且从 \EFI\visor\drivers 加载了 btrfs EFI
+#    驱动时（可用 visor drivers 安装），Visor 按以下顺序自行发现快照：
+#      - Snapper：<root-subvol>/.snapshots/N/snapshot。
+#        根子卷取自启动项的 rootflags=subvol=，例如 @、root、@rootfs 或自定义值；
+#        否则尝试顶层或 @（openSUSE 风格的默认子卷布局）。日期和说明取自 info.xml。
+#      - Timeshift：timeshift-btrfs/snapshots/<tag>/@，仅 btrfs 模式；
+#        日期取自标签，说明取自 info.json。
+#      - 普通快照：/.snapshots、/snapshots 或 /@snapshots 下的子卷。
+#    启动命令行以原项为基础，把 rootflags=subvol=... 改为快照路径，保留其他 rootflags。
+#    仅支持恰好一个带 root= 命令行的 Linux 项；多发行版应使用清单。
+#    显示最新的 12 个快照，使用该项当前的内核启动。
 #
-# Each snapshot in the manifest carries id / date / description and the full
-# kernel command line for booting that snapshot (rootflags=subvol=... baked
-# in), plus optional per-snapshot kernel/initrd overrides:
+# 清单中的每个快照包含 id、date、description 和启动该快照的完整内核命令行，
+# 其中已经包含 rootflags=subvol=...；也可为每个快照覆盖 kernel/initrd：
 #
 #   snapshot {
-#       os      = Arch Linux         # boot entry to attach to (name substring)
+#       os      = Arch Linux         # 要关联的启动项，按名称子串匹配
 #       id      = 42
 #       date    = 2026-07-18 14:22
 #       desc    = pacman -Syu linux
 #       cmdline = root=UUID=... rootflags=subvol=@/.snapshots/42/snapshot ro
 #   }
 #
-# In the menu, press V on an entry to cycle its bottom panel:
-#   entry info -> deployments (BLS/ostree, if several) -> snapshots -> back
-# The snapshot panel unfolds the center info into a browsing list sized to
-# the free space under the icon row. Up/Down (or the mouse wheel) select,
-# Enter boots the selected snapshot (one-shot - nothing is persisted),
-# Esc backs out. Booting a read-only snapper snapshot needs the same distro
-# support (overlayfs initramfs hook / snapper rollback) as grub-btrfs.
+# 菜单中选中启动项后按 V，依次切换底部面板：
+#   启动项信息 -> 部署版本（存在多个 BLS/ostree 部署时）-> 快照 -> 返回。
+# 快照面板将中央详情展开为浏览列表，大小适应图标行下方的空余区域。
+# 上下键或鼠标滚轮选择，Enter 启动选中的快照一次，不保存选择，Esc 返回。
+# 启动只读 Snapper 快照需要与 grub-btrfs 相同的发行版支持，
+# 例如 overlayfs initramfs 钩子或 Snapper 回滚。
 
 # ============================================================================
-#  Menu keys
-#    Left/Right                move between boot entries
-#    Down                      enter the power column (Shutdown), then move down
-#    Up                        move up the power column; from the top, back to entries
-#    Enter                     boot the focused entry / run the focused power action
-#    V                         cycle entry info / deployments / snapshots panel
-#    e                         edit the kernel command line for this boot only
-#                              (needs editor=1)
-#    1-9                       boot entry N directly
-#    S / R / F                 Shutdown / Reboot / Firmware setup (from anywhere)
-#    Esc                       open the options / rescue console: list and pick
-#                              entries, edit kernel options for one boot, read
-#                              boot.log, reboot or enter firmware setup
+#  菜单按键
+#    左／右方向键   在启动项之间移动。
+#    下方向键       进入电源操作列（关机），随后继续向下移动。
+#    上方向键       在电源列向上移动；到顶部后返回启动项。
+#    Enter          启动当前选中项，或执行当前选中的电源动作。
+#    V              切换启动项信息／部署版本／快照面板。
+#    e              只为本次启动编辑内核命令行，需要 editor=1。
+#    1–9            直接启动编号为 N 的启动项。
+#    S / R / F      从任意位置执行关机／重启／固件设置。
+#    Esc            打开选项／救援控制台，列出并选择启动项、临时编辑内核参数、
+#                   读取 boot.log、重启或进入固件设置。
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-#  Boot entry format
-#    entry {                                    (one block type for everything)
+#  启动项格式
+#    entry {                                    # 所有类型共用一种块格式
 #        name      = "Display Name"
-#        icon      = \path\to\icon.png        (optional - when omitted Visor
-#                                               derives it from the entry name:
-#                                               "Arch Linux" -> icons\arch.png,
-#                                               a Windows image -> windows.png,
-#                                               anything else -> linux.png)
-#        icon_size = 128                       (optional - overrides global icon_size)
+#        icon      = \path\to\icon.png        # 可选，省略时根据名称推断：
+#                                               # Arch Linux -> icons\arch.png；
+#                                               # Windows 镜像 -> windows.png；
+#                                               # 其他 -> linux.png。
+#        icon_size = 128                       # 可选，覆盖全局 icon_size
 #        kernel    = \path\to\kernel-or-efi
-#        initrd    = \path\to\initrd          (optional - Linux stub kernels)
-#        cmdline   = "kernel command line"     (optional)
-#        options   = "kernel command line"     (alias for cmdline; systemd-boot style)
-#        color     = #RRGGBB                   (optional per-entry name color)
-#        uuid      = partition-uuid            (optional - pin which partition the
-#                                               kernel/bootmgr lives on, by PARTUUID)
-#        sha256    = <64 hex chars>            (optional - pin the image hash)
-#        encrypted = 1                         (optional - kernel and initrd are
-#                                               Visor encrypted containers)
-#        kernel_encrypted = 1                  (optional - override only kernel)
-#        initrd_encrypted = 1                  (optional - override only initrd)
-#        luks      = 1                         (optional - ask for a LUKS password
-#                                               and inject it as an initrd keyfile;
-#                                               alias: luks_password - a switch,
-#                                               not a place to put a passphrase)
-#        luks_key_path = /crypto_keyfile.bin   (optional - path inside initramfs)
-#        luks_preset = mkinitcpio              (optional - auto-generate keyfile
-#                                               option; mkinitcpio/arch, dracut,
-#                                               systemd; alias: luks_initramfs)
-#        luks_cmdline = "..."                  (optional - manual keyfile option;
-#                                               overrides luks_preset; aliases:
-#                                               luks_options, luks_options_append)
-#        luks_confirm = 1                      (optional - ask for the passphrase
-#                                               twice and compare, see below;
-#                                               alias: luks_verify)
-#        luks_verbose = 1                      (optional - drop quiet/splash from
-#                                               this entry's cmdline, see below;
-#                                               alias: luks_show_prompt)
+#        initrd    = \path\to\initrd          # 可选，用于 Linux EFI stub 内核
+#        cmdline   = "kernel command line"     # 可选
+#        options   = "kernel command line"     # cmdline 别名，兼容 systemd-boot 风格
+#        color     = #RRGGBB                   # 可选，单个启动项的名称颜色
+#        uuid      = partition-uuid            # 可选，以 PARTUUID 固定内核／bootmgr 所在分区
+#        sha256    = <64 hex chars>            # 可选，固定镜像哈希
+#        encrypted = 1                         # 可选，内核和 initrd 为 Visor 加密容器
+#        kernel_encrypted = 1                  # 可选，只覆盖内核加密设置
+#        initrd_encrypted = 1                  # 可选，只覆盖 initrd 加密设置
+#        luks      = 1                         # 可选，询问 LUKS 密码并作为密钥文件注入 initrd；
+#                                               # 别名 luks_password，这是开关，不是填写密码的位置。
+#        luks_key_path = /crypto_keyfile.bin   # 可选，initramfs 内的密钥文件路径
+#        luks_preset = mkinitcpio              # 可选，自动生成密钥文件参数；
+#                                               # 支持 mkinitcpio/arch、dracut、systemd；
+#                                               # 别名 luks_initramfs。
+#        luks_cmdline = "..."                  # 可选，手动指定密钥文件参数，覆盖 luks_preset；
+#                                               # 别名 luks_options、luks_options_append。
+#        luks_confirm = 1                      # 可选，输入两次密码并比较，详见下文；
+#                                               # 别名 luks_verify。
+#        luks_verbose = 1                      # 可选，移除该项命令行中的 quiet/splash，
+#                                               # 详见下文；别名 luks_show_prompt。
 #    }
 #
-#  About luks=1 and wrong passphrases: Visor cannot verify the passphrase - it
-#  hands it to the initramfs as a keyfile, and the initramfs is what unlocks the
-#  volume. If the keyfile is rejected the initramfs asks for the passphrase
-#  itself, but with "quiet splash" on the cmdline that prompt is hidden and the
-#  boot looks like a silent hang. Two mitigations:
-#      luks_confirm = 1   type the passphrase twice at the prompt; a mismatch
-#                         reprompts instead of booting with a typo
-#      luks_verbose = 1   remove quiet and splash from this entry's cmdline so
-#                         the initramfs retry prompt is actually visible
-#  At the passphrase prompt, F2 toggles showing what you typed - use it to check
-#  your keyboard layout before pressing Enter.
+#  关于 luks=1 和错误密码：Visor 无法验证密码本身，而是作为密钥文件交给 initramfs，
+#  由 initramfs 解锁卷。密钥被拒绝后，initramfs 会自行询问密码；
+#  但命令行中的 quiet splash 可能隐藏提示，看起来像无提示地卡住。
+#  可以用以下两项缓解：
+#      luks_confirm = 1   要求输入两次密码，不一致时重新询问，避免带着拼写错误启动。
+#      luks_verbose = 1   从该项移除 quiet 和 splash，使 initramfs 的重试提示可见。
+#  输入密码时按 F2 可切换明文显示，用于在按 Enter 前检查键盘布局。
 #
-#  There is no longer a separate "linux"/"windows" block or a "type=" key:
-#  Visor auto-detects how to boot each entry from the image itself -
-#      * a PE image with no initrd/cmdline   -> chainloaded (e.g. Windows
-#        bootmgfw.efi); loaded by device path so its BCD is found
-#      * a PE image (UKI, or EFI-stub vmlinuz) -> LoadImage/StartImage, with
-#        cmdline and initrd applied if given (initrd via the standard
-#        LINUX_EFI_INITRD_MEDIA_GUID protocol, the same mechanism systemd-boot
-#        uses - so a plain vmlinuz + separate initramfs boots without a UKI)
-#      * a raw (non-PE) kernel               -> Linux EFI handover boot-params
-#  The block names "linux" and "windows" are still accepted as aliases for
-#  "entry" (old configs keep working), but they no longer affect booting.
+#  不再需要独立的 linux/windows 块，也不需要 type= 键：
+#  Visor 根据镜像本身判断启动方式。
+#      * 不带 initrd/cmdline 的 PE 镜像：链式加载，例如 Windows bootmgfw.efi；
+#        通过设备路径加载，以便找到 BCD。
+#      * PE 镜像（UKI 或 EFI stub vmlinuz）：使用 LoadImage/StartImage，
+#        并在指定时传递 cmdline 和 initrd。initrd 使用标准
+#        LINUX_EFI_INITRD_MEDIA_GUID 协议，与 systemd-boot 相同，
+#        因而普通 vmlinuz 加独立 initramfs 无需制作 UKI 也能启动。
+#      * 原始非 PE 内核：使用 Linux EFI handover 启动参数。
+#  linux 和 windows 块名称仍可作为 entry 的别名，使旧配置继续可用，
+#  但这些名称不再决定启动方式。
 #
-#  Auto-detection (used only when boot.conf is absent, or has no entries):
-#    Visor scans the ESP for kernels instead of guessing fixed paths -
-#      * \EFI\Linux\*.efi          Unified Kernel Images (each becomes an entry)
-#      * \boot\vmlinuz*, \vmlinuz* raw kernels (fallback if no UKIs found)
-#      * \EFI\Microsoft\Boot\bootmgfw.efi   Windows Boot Manager
+#  自动检测（仅在 boot.conf 不存在或没有启动项时使用）：
+#    Visor 扫描 ESP 查找内核，而非猜测固定路径：
+#      * \EFI\Linux\*.efi                    统一内核镜像 UKI，每个生成一个启动项。
+#      * \boot\vmlinuz*、\vmlinuz*           原始内核，未发现 UKI 时作为回退。
+#      * \EFI\Microsoft\Boot\bootmgfw.efi   Windows 启动管理器。
 
 # ----------------------------------------------------------------------------
 
@@ -828,9 +731,9 @@ background=\EFI\visor\backgrounds\default.png
 #     nabu_action=linux
 # }
 
-# Linux example - EFI stub kernel or Unified Kernel Image (UKI).
-# For a UKI, point "kernel" at the .efi and omit initrd/cmdline.
-# For a plain stub kernel, supply initrd and cmdline as shown.
+# Linux 示例：EFI stub 内核或统一内核镜像（UKI）。
+# 使用 UKI 时，将 kernel 指向 .efi，并省略 initrd/cmdline。
+# 使用普通 stub 内核时，按下例提供 initrd 和 cmdline。
 #entry {
 #    name    = "Arch Linux"
 #    icon    = \EFI\visor\icons\arch.png
@@ -840,11 +743,10 @@ background=\EFI\visor\backgrounds\default.png
 #    cmdline = "root=PARTUUID=CHANGE-ME-TO-YOUR-ROOT-PARTUUID......"
 #}
 
-# Encrypted boot artifact example. Create the files with:
+# 加密启动文件示例，使用以下命令生成文件：
 #   python3 tools/visor_encrypt.py vmlinuz-linux vmlinuz-linux.venc
 #   python3 tools/visor_encrypt.py initramfs-linux.img initramfs-linux.img.venc
-# Visor prompts for the password after you select the entry, decrypts the files
-# in memory, then boots the decrypted kernel/UKI/initrd.
+# 选中启动项后，Visor 询问密码，在内存中解密文件，再启动解密后的内核／UKI／initrd。
 #entry {
 #    name      = "Encrypted Arch"
 #    icon      = \EFI\visor\icons\arch.png
@@ -854,42 +756,38 @@ background=\EFI\visor\backgrounds\default.png
 #    cmdline   = "root=PARTUUID=CHANGE-ME rw quiet"
 #}
 
-# LUKS root example. Visor does not decrypt the disk itself; it asks for the
-# password, appends it as a temporary keyfile into the initramfs path, and your
-# initramfs/cryptsetup setup unlocks the LUKS device. The keyfile is present in
-# the initrd memory handed to Linux.
+# LUKS 根分区示例。Visor 不直接解密磁盘，而是询问密码，
+# 将密码作为临时密钥文件追加到 initramfs 的指定路径，
+# 再由 initramfs/cryptsetup 解锁 LUKS 设备。密钥文件位于交给 Linux 的 initrd 内存中。
 #
-# ---- CRITICAL: mapper-name consistency ----
-# The mapper device name in your kernel cmdline must match what /etc/fstab and
-# /etc/crypttab expect. A mismatch can cause confusing multi-stage boot failures
-# (kernel panic, hung mounts, emergency mode). Follow this checklist:
+# ---- 重要：映射设备名称必须一致 ----
+# 内核命令行中的 mapper 设备名必须与 /etc/fstab、/etc/crypttab 的预期一致。
+# 不一致会导致难以判断的多阶段启动故障，例如内核崩溃、挂载卡住或进入紧急模式。
+# 请核对以下各项：
 #
-# 1. Kernel cmdline (the cmdline= field below):
-#    Use  rd.luks.name=<UUID>=<name>  to force the mapper device to a specific
-#    name.  Do NOT use rd.luks.uuid=<UUID> alone -- that auto-generates the name
-#    "luks-<UUID>", which WILL NOT match a custom root= value.
+# 1. 内核命令行，即下方 cmdline=：
+#    用 rd.luks.name=<UUID>=<name> 明确指定 mapper 设备名。
+#    不要单独使用 rd.luks.uuid=<UUID>，否则会自动生成 luks-<UUID> 名称，
+#    无法匹配自定义 root= 值。
 #
-#    Example:
+#    例如：
 #      rd.luks.name=XXX=cryptroot
 #      root=/dev/mapper/cryptroot
 #
-# 2. /etc/crypttab:
-#    If root decryption is handled entirely via the kernel cmdline (as it is
-#    here), you should REMOVE the root's crypttab entry entirely. Keeping it
-#    causes systemd-cryptsetup to generate a competing service for the same
-#    device, which will fail with "already mapped or mounted" and drag
-#    dependent targets into emergency mode -- even though root itself unlocks
-#    fine.
+# 2. /etc/crypttab：
+#    如果根分区解密完全由内核命令行处理（如下例），应删除 crypttab 中的根分区项。
+#    保留该项会使 systemd-cryptsetup 为同一设备生成竞争服务，
+#    因“already mapped or mounted”失败，并将依赖目标拖入紧急模式，
+#    即使根分区本身已正确解锁。
 #
-# 3. /etc/fstab:
-#    EVERY mount on the LUKS device must use the SAME mapper name as root=.
-#    If you have subvolumes (/, /home, /var, ...), each fstab entry must
-#    reference  /dev/mapper/<name>  -- never the auto-generated luks-<UUID>
-#    or any other name. A single fstab entry with the wrong name will cause
-#    the boot to hang/time out waiting for that device.
+# 3. /etc/fstab：
+#    LUKS 设备上的所有挂载必须使用与 root= 相同的 mapper 名称。
+#    如果有 /、/home、/var 等子卷，每一项都必须引用 /dev/mapper/<name>，
+#    不要使用自动生成的 luks-<UUID> 或其他名称。
+#    只要有一项名称错误，就可能因等待不存在的设备而卡住或超时。
 #
-# In short: pick one mapper name, use it consistently in rd.luks.name=, root=,
-# and every fstab mount -- and drop the root's crypttab line.
+# 请选择一个 mapper 名称，在 rd.luks.name=、root= 和所有 fstab 挂载中统一使用，
+# 并删除 crypttab 中的根分区行。
 # ----
 #entry {
 #    name      = "Arch LUKS"
@@ -900,15 +798,15 @@ background=\EFI\visor\backgrounds\default.png
 #    luks      = 1
 #    luks_key_path = /crypto_keyfile.bin
 #    luks_preset = mkinitcpio
-#    # For custom initramfs setups, use luks_cmdline instead.
+#    # 自定义 initramfs 配置可改用 luks_cmdline。
 #}
 
-# UKI + LUKS example. The UKI is left unchanged; Visor provides a supplemental
-# keyfile-only initrd through the Linux EFI initrd protocol. Your UKI's embedded
-# initramfs must support the generated or manual keyfile option.
+# UKI + LUKS 示例。UKI 本身保持不变，Visor 通过 Linux EFI initrd 协议
+# 提供一个只包含密钥文件的附加 initrd。UKI 内置的 initramfs 必须支持
+# 自动生成或手动指定的密钥文件参数。
 #
-# See the LUKS root example above for the mapper-name consistency checklist
-# (rd.luks.name= / root= / fstab / crypttab must all agree).
+# mapper 名称一致性要求见上方 LUKS 根分区示例：
+# rd.luks.name=、root=、fstab 和 crypttab 必须相互一致。
 #entry {
 #    name      = "Arch UKI LUKS"
 #    icon      = \EFI\visor\icons\arch.png
@@ -919,9 +817,9 @@ background=\EFI\visor\backgrounds\default.png
 #    luks_preset = mkinitcpio
 #}
 
-# Windows example - chainloads the Windows Boot Manager. "kernel" is the path
-# to bootmgfw.efi; Visor detects the PE image and loads it via its device path
-# so the BCD is found. No type= needed.
+# Windows 示例：链式加载 Windows 启动管理器。
+# kernel 为 bootmgfw.efi 的路径；Visor 识别 PE 镜像后通过设备路径加载，以便找到 BCD。
+# 无需 type=。
 #entry {
 #    name   = "Windows 11"
 #    icon   = \EFI\visor\icons\windows.png
