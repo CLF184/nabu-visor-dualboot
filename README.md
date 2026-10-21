@@ -25,7 +25,7 @@ py -m pip install --target tools/python ziglang==0.14.1
 | `third_party/gnu-efi` | EFI C 库和头文件 |
 | `third_party/renegade` | Reboot2PayloadApp、BootShim 标记循环与 BootSlotDxe |
 
-准备 Windows 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，放到 `tools/official/`。补丁工具上游：[Project-Aloha/DualBootKernelPatcher](https://github.com/Project-Aloha/DualBootKernelPatcher)。仓库包含 nabu 补丁配置与入口代码，工具可执行文件需自行提供。
+仓库已包含构建使用的 Windows x64 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，位于 `tools/official/`，拉取后无需另行下载补丁工具。沿用现用工具版本，不改变打补丁流程；来源、许可证和 SHA-256 见 [补丁工具说明](tools/official/README.md)。
 
 另外准备**未加本菜单补丁的 Android boot.img** 和**原始 nabu UEFI .fd**。默认路径如下，也可在命令中指定：
 
@@ -35,7 +35,7 @@ py -m pip install --target tools/python ziglang==0.14.1
 | 原始 nabu UEFI FD | `tools/official/nabu-uefi.fd` |
 | 输出目录 | `dist/` |
 
-GitHub 保存源码、补丁、配置和子模块指针；原始固件、工具安装目录和编译产物仅保留在本机。
+GitHub 保存源码、补丁、配置、上述两个补丁工具及子模块指针；原始固件、Python/Zig 安装目录和编译产物仅保留在本机。
 
 ## 编译
 

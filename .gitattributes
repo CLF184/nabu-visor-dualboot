@@ -4,3 +4,5 @@
 *.patch text eol=lf
 *.cmd text eol=crlf
 *.bin -text
+*.exe -text
+*.xz -text

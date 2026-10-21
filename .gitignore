@@ -8,6 +8,8 @@ __pycache__/
 /dist/
 /tools/python/
 /tools/official/*.exe
+!/tools/official/magiskboot.exe
+!/tools/official/DualBootKernelPatcher-x86_64.exe
 /tools/official/*.img
 /tools/official/*.fd
 /esp/EFI/visor/NabuAndroid.efi
