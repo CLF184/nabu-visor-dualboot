@@ -3,6 +3,7 @@
 *.md text eol=lf
 *.patch text eol=lf
 *.cmd text eol=crlf
+port/magisk-host.sh text eol=lf
 *.bin -text
 *.exe -text
 *.xz -text
