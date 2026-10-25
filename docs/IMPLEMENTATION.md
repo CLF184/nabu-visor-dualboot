@@ -89,6 +89,16 @@ Windows 的 BDS 动作退出 Visor 并继续原固件启动流程。配置中的
 
 ## 构建与发布
 
+### 可选镜像准备
+
+`boot_inputs.py` 在编译、发布之前处理可选输入。`--fd` 可接收原 FD、BootShim+FD，或 Android boot 格式的 UEFI `.img`：解包后按 `_FVH` 定位候选，通过现有固件卷和 BDS 检查选取唯一的 3 MiB nabu FD。
+
+`--recovery` 仅取指定镜像的 ramdisk 合入 Android boot，核对其包含 Recovery 程序，并再次解包比较原 Android 内核及所选 ramdisk。它不沿用 Recovery 镜像的内核、头部或自定义 cmdline，也不写平板分区；这些内容是否兼容当前内核仍需由输入镜像保证。
+
+root 准备位于 Recovery 合入之后、Visor 内核补丁之前。Magisk 使用所选 APK 中未修改的 `boot_patch.sh`、工具函数和 ARM64 资源，由 `port/magisk-host.sh` 仅适配 Windows 输出、失败退出及 nabu 的配置参数；原修补过程由 Windows BusyBox 和现有 magiskboot 执行。KSU 读取 APK ARM64 daemon 的 RustEmbed/DEFLATE 资源，按 KMI 提取 APK 自带 LKM 与唯一 ksuinit，再显式传入原版 Windows ksud；不回退到主机工具内置模块，不下载其他版本资源或自动替换内核。当前官方 KSU 3.3.1 同版本模块的官方摘要用于解决 5.10 KMI 映射歧义，其他可唯一识别的资源仍取自用户 APK。
+
+所有处理均离线进行，失败不发布成品。新选项的输入文件路径加入发布保护，禁止输出覆盖 boot、UEFI、Recovery 或 APK；源文件不修改。最终保留原有内核/FD/重打包校验，并比较处理后的 ramdisk。`input_preparation` 记录来源与处理哈希；有显式 Recovery/root 准备时，不再将原始 ramdisk 标记为未修改。不选择新选项的默认 boot 已核对与原工作镜像 SHA256 一致。
+
 `port/visor/NABU.patch` 只应用到 Visor 的临时副本。`port/recovery/overlay.py` 额外生成三个覆盖文件：
 
 1. `src/visor_platform.c`：第三个电源按钮调用 Recovery 请求。

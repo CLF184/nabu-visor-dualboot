@@ -19,6 +19,7 @@ import tempfile
 import zipfile
 sys.dont_write_bytecode = True
 from build_publish import publish_files
+from boot_inputs import load_uefi, prepare_boot
 COMMIT = 'e1952621f419f8db60ed28271264e1b5184c571d'
 SOURCE_HASHES = {
     'Reboot2PayloadApp.c': '363f69fdcddd7534646126bc401aefded0efc9db',
@@ -102,10 +103,17 @@ def main():
     ap.add_argument('--port', type=Path, default=Path(__file__).resolve().parent/'port/renegade')
     ap.add_argument('--boot', type=Path)
     ap.add_argument('--fd', type=Path)
+    ap.add_argument('--recovery', type=Path)
+    root_apk = ap.add_mutually_exclusive_group()
+    root_apk.add_argument('--magisk-apk', type=Path)
+    root_apk.add_argument('--ksu-apk', type=Path)
+    ap.add_argument('--ksu-kmi')
     ap.add_argument('--recovery-port', type=Path, help='Optional standard BCB Recovery button adapter')
     ap.add_argument('--output-prefix', default='nabu-visor')
     ap.add_argument('--out-dir', required=True, type=Path)
     args = ap.parse_args()
+    if args.ksu_kmi and not args.ksu_apk:
+        ap.error('--ksu-kmi requires --ksu-apk')
     root, port, out = args.project.resolve(), args.port.resolve(), args.out_dir.resolve()
     stock = (args.boot or root/'tools/official/stock-boot.img').resolve()
     base_fd = (args.fd or root/'tools/official/nabu-uefi.fd').resolve()
@@ -121,6 +129,8 @@ def main():
                 root/'tools/official/magiskboot.exe', root/'tools/official/DualBootKernelPatcher-x86_64.exe',
                 *source_paths.values(), root/'third_party/visor/features/features.mk',
                 root/'third_party/gnu-efi/inc/efi.h']
+    optional_inputs = [p.resolve() for p in (args.recovery, args.magisk_apk, args.ksu_apk) if p]
+    required.extend(optional_inputs)
     missing = [str(p) for p in required if not p.is_file()]
     if missing:
         raise SystemExit('Missing build inputs/tools/submodules. See README setup instructions:\n'+'\n'.join(missing))
@@ -152,6 +162,14 @@ def main():
     vb = load(root/'visor_build.py', 'visor_build_candidate')
     fp = load(root/'fd_patch.py', 'fd_patch_candidate')
     bp = load(root/'patch_boot.py', 'boot_patch_candidate')
+    magisk = root/'tools/official/magiskboot.exe'
+    raw_fd, fd_input_record = load_uefi(base_fd, magisk, work, fp)
+    print('[prepare] UEFI input verified; prepare optional Recovery/root inputs', flush=True)
+    apk = args.magisk_apk or args.ksu_apk
+    prepared_stock, preparation = prepare_boot(
+        stock, args.recovery.resolve() if args.recovery else None,
+        apk.resolve() if apk else None, 'magisk' if args.magisk_apk else 'ksu',
+        magisk, root/'tools/official', work, args.ksu_kmi)
     vb.prepare()
     # Keep the upstream submodule pristine; apply the nabu patch only to a temporary copy.
     visor = work/'visor'
@@ -227,7 +245,6 @@ def main():
     slot_builder = load(root/'boot_slot_build.py', 'boot_slot_build_candidate')
     slot_driver, slot_record = slot_builder.build(root, work, run, zig)
     print('[2/4] Keep original firmware modules; add menu and upstream BootSlotDxe', flush=True)
-    raw_fd = base_fd.read_bytes()
     before = inventory(fp, raw_fd)
     existing_slot = fp.inspect_fd(raw_fd)['boot_slot_drivers']
     if existing_slot > 1:
@@ -250,7 +267,7 @@ def main():
     print('[3/4] Pair upstream marker loops with Nabu kernel/FD continuation', flush=True)
     boot_dir = work/'boot'
     boot_dir.mkdir()
-    shutil.copy2(stock, boot_dir/'stock-boot.img')
+    shutil.copy2(prepared_stock, boot_dir/'stock-boot.img')
     official = root/'tools/official'
     magisk = official/'magiskboot.exe'
     run(magisk, 'unpack', '-h', 'stock-boot.img', cwd=boot_dir)
@@ -322,7 +339,8 @@ def main():
         'device': 'xiaomi-nabu', 'status': 'CANDIDATE_NOT_HARDWARE_TESTED', 'hardware_tested': False,
         'upstream': {'repo': 'https://github.com/edk2-porting/edk2-msm', 'commit': COMMIT, 'sources': sources},
         'input_boot': {'path': str(stock), 'sha256': sha(stock.read_bytes())},
-        'input_fd': {'path': str(base_fd), 'sha256': sha(raw_fd)},
+        'input_fd': fd_input_record,
+        'input_preparation': preparation,
         'output_boot': {'file': image_path.name, 'sha256': sha(boot), 'size': len(boot)},
         'output_fd': {'file': fd_path.name, 'sha256': sha(fd)},
         'esp_package': {'file': archive.name, 'sha256': sha(archive.read_bytes())},
@@ -333,8 +351,10 @@ def main():
                    'padding_size': fd_offset - len(original), 'helper_offset': origin,
                    'helper_size': len(helper), 'android_entry': hex(android_entry), 'sha256': sha(result_kernel)},
         'verification': {'original_executable_firmware_modules_unchanged': True,
-                         'original_generic_psci_reset_retained': True, 'original_android_payload_unchanged': True,
-                         'ramdisk_unchanged': True, 'original_fd_copy_and_entry_unchanged': True,
+                         'original_generic_psci_reset_retained': True,
+                         'original_android_payload_unchanged': not bool(args.recovery or apk),
+                         'ramdisk_unchanged': not bool(args.recovery or apk),
+                         'prepared_ramdisk_unchanged': True, 'original_fd_copy_and_entry_unchanged': True,
                          'repacked_kernel_matches': True},
         'notes': ['Candidate only. No real Android boot has been verified.',
                   'Both marker writer and reader must be installed as a pair.',
@@ -353,7 +373,7 @@ def main():
             'menu_bypass': 'call the unchanged nabu_renegade_android bridge: 128 x 0x5241 at 0x17FE00000, cache clean, warm reset',
             'reset': 'existing FD EfiResetWarm',
             'failure': 'restore original request and show error; no reboot on write failure',
-            'target': 'Recovery already installed on tablet; no Recovery image replacement',
+            'target': 'Recovery ramdisk included from --recovery' if args.recovery else 'Recovery already installed on tablet; no Recovery image replacement',
         }
         manifest['recovery_sources'] = {
             p: sha(path.read_bytes()) for p, path in overlays.items()
@@ -382,7 +402,7 @@ def main():
             'Windows BDS, Visor UI/config/assets, keys and 5-second idle behavior retained.',
             'The third button writes the Recovery BCB, then reuses the existing Renegade marker/warm-reset bridge to bypass Visor once.',
             'Native Recovery boot context from the original FDT bypasses Visor without an additional reboot, including the power/volume-up path. The previous build was confirmed for keys; this generated image still requires verification.',
-            'The provided TWRP file is not embedded or flashed; the installed Recovery is used.',
+            'Recovery ramdisk is included from the selected image.' if args.recovery else 'No Recovery ramdisk was supplied; the installed Recovery is used.',
             'No old Qualcomm reset driver, direct Linux loader or extra SimpleInit menu.',
         ]
     manifest['linux_protocol'] = {
@@ -417,7 +437,7 @@ def main():
             target = root/'esp'/file.relative_to(esp_tree)
             if not target.is_file() or sha(file.read_bytes()) != sha(target.read_bytes()):
                 replacements.append((file, target))
-    inputs = {stock, base_fd}
+    inputs = {stock, base_fd, *optional_inputs}
     if any(target.resolve() in inputs for _, target in replacements):
         raise ValueError('Build outputs must not overwrite the input boot or FD')
     backup = publish_files(replacements, output_dir/'.build-backup')

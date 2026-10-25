@@ -10,6 +10,8 @@ __pycache__/
 /tools/official/*.exe
 !/tools/official/magiskboot.exe
 !/tools/official/DualBootKernelPatcher-x86_64.exe
+!/tools/official/busybox.exe
+!/tools/official/ksud.exe
 /tools/official/*.img
 /tools/official/*.fd
 /esp/EFI/visor/NabuAndroid.efi

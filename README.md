@@ -25,9 +25,9 @@ py -m pip install --target tools/python ziglang==0.14.1
 | `third_party/gnu-efi` | EFI C 库和头文件 |
 | `third_party/renegade` | Reboot2PayloadApp、BootShim 标记循环与 BootSlotDxe |
 
-仓库已包含构建使用的 Windows x64 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，位于 `tools/official/`，拉取后无需另行下载补丁工具。沿用现用工具版本，不改变打补丁流程；来源、许可证和 SHA-256 见 [补丁工具说明](tools/official/README.md)。
+仓库已包含构建使用的 Windows x64 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，以及可选 APK 修补所需的 `busybox.exe`、`ksud.exe`，位于 `tools/official/`，拉取后无需另行下载补丁工具。原有两个工具保持现用版本；来源、许可证和 SHA-256 见 [补丁工具说明](tools/official/README.md)。
 
-另外准备**未加本菜单补丁的 Android boot.img** 和**原始 nabu UEFI .fd**。
+另外准备**未加本菜单补丁的 Android boot.img** 和**原始 nabu UEFI `.fd` 或 `.img`**。
 
 如果手里只有 nabu UEFI `.img`，可使用 [ArKT 的 UEFI FD 提取网页](https://arkt-7.github.io/nabu-uefi-autopatcher/) 上传该镜像，在 `EXTRACTED COMPONENTS` 中下载 `extracted.fd`。将它作为构建命令的 `--fd` 输入，或改名为 `nabu-uefi.fd` 放到 `tools/official/`。请从未加入本菜单补丁的原始 UEFI 镜像提取，Android `boot.img` 仍需另行准备。
 
@@ -56,12 +56,43 @@ py build.py --boot "E:\path\original-android-boot.img" --fd "E:\path\new-nabu.fd
 ```
 
 - `--boot`：原始 Android boot 镜像路径。
-- `--fd`：未插入本菜单的 nabu UEFI FD 路径。
+- `--fd`：nabu UEFI `.fd` 或 `.img` 路径；`.img` 会自动解包并提取、校验 FD。
+- `--recovery`：可选 Recovery 镜像；省略时沿用原 boot 的 ramdisk，指定时合入 Recovery ramdisk、保留 Android 内核。
+- `--magisk-apk` / `--ksu-apk`：可选 root APK，可全部省略；需要修补时最多指定一个。
+- `--ksu-kmi`：可选 KSU KMI，如 `android14-6.1`；默认从输入内核识别，手动指定仍须与内核版本一致。
 - `--out-dir`：输出目录；省略则使用 `dist/`。
 
 **输出目录可以已存在。同名生成文件在全部校验通过后覆盖，其他文件保留。** 构建先在独立临时目录完成；发布失败尝试回滚。替换前的文件保存在输出目录 `.build-backup/backup.zip`，只保留最近一次。压缩包内 `publication.json` 记录各备份文件对应的原路径。
 
 查看所有参数：`py build.py --help`。
+
+### 合入 Recovery 和 root
+
+**Recovery 和 root APK 都不是必选项，也没有默认替换文件。** 都不指定时，沿用原 boot 的 ramdisk，包括其中已有的 Recovery/root 内容，仅执行原有 Visor/FD 补丁流程：
+
+```powershell
+py build.py --boot "E:\path\boot.img" --fd "E:\path\uefi.img"
+```
+
+也可只指定 root APK（在原 ramdisk 上修补），或只指定 Recovery（换成其 ramdisk，不额外执行 root 修补）。Recovery ramdisk 是整体替换：只选择 Recovery 时，最终 root 内容取决于该 Recovery ramdisk，不会自动从被替换的原 ramdisk 迁移 root。
+
+例如，选择 UEFI 镜像、Recovery 和 Magisk APK：
+
+```powershell
+py build.py --boot "E:\path\boot.img" --fd "E:\path\uefi.img" --recovery "E:\path\twrp.img" --magisk-apk "E:\path\Magisk.apk"
+```
+
+改用 KSU 时，将最后一项换成 `--ksu-apk "E:\path\KernelSU.apk"`。不需要合入 Recovery 或 root 时，省略对应参数即可。
+
+处理顺序为 **Recovery ramdisk → root 修补 → Visor/FD 补丁**。全部在 Windows 离线完成，不需要 ADB，不安装 APK、不刷写设备。输入文件不修改；任何步骤失败就中止，不发布或覆盖已有成品。
+
+- UEFI `.img` 支持 Android boot 封装，以及 BootShim 后附 FD 的布局。按固件卷结构寻找唯一、有效的 3 MiB nabu FD，继续使用现有模块校验；不接受其他设备的任意 UEFI 镜像。
+- Recovery 合入只替换 boot 的 ramdisk，保留所选 Android 内核和其余打包内容，不写 recovery/vendor_boot 等分区。需要适配 nabu、兼容该 Android 内核的 recovery-as-boot 镜像；工具不能保证任意 Recovery/内核组合能启动。
+- Magisk 从所选 APK 提取 ARM64 资源，原样执行其中的 `boot_patch.sh`。Windows BusyBox 只提供主机脚本环境和输出适配；保留 verity、加密配置，不自动修改 vbmeta 分区。nabu 的 pre-init 分区默认使用 `metadata`；已有 Magisk 配置仍由 APK 原脚本读取和继承。已安装 Magisk 的输入由 APK 原脚本执行恢复及重修补。
+- KSU 从所选 APK 的 ARM64 `ksud` 中提取嵌入的 `ksuinit` 与匹配 LKM，调用原版 Windows `ksud boot-patch`。不使用 Windows 工具自带的模块替代 APK 模块。官方 KernelSU v3.3.1 资源已核对；其他版本/分支会尝试识别，资源格式不支持、映射不唯一或内核不兼容时直接报错。
+- **nabu 常用的 4.14 内核不满足官方 KSU LKM 的兼容要求。** APK 不能替代内核适配；失败时不会换内核、退回其他 root 方式或生成伪成功成品。
+
+`manifest.json` 的 `input_preparation` 记录 Recovery/APK 哈希、root 补丁器、KSU KMI 和处理后 boot 的哈希。最终再次解包，确认打包的内核和处理后的 ramdisk 一致。合入 Recovery/root 后，原始 ramdisk 未修改的旧校验标志会相应设为 false。
 
 ### 成品
 
