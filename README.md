@@ -158,6 +158,8 @@ default=0
 
 `title=none` 隐藏标题；`default` 按条目顺序从 0 开始，目前 0 为 Android。完整配置格式见 `boot.conf.example`。
 
+实机参考配置：[config/examples/nabu-tripleboot.conf](config/examples/nabu-tripleboot.conf)。内容直接取自平板 ESP 的 `EFI/visor/boot.conf`，保留 Android、Windows、Ubuntu 三个条目及已注释的 Arch 条目，使用 5 秒默认 Android、隐藏标题和 EFI 路径显示、自定义静态背景。它仅作参考，不替换默认配置，也不会被自动读取或打包；使用时按需调整，再保存为 ESP 的 `EFI/visor/boot.conf`。其中 `bg_custom.png` 背景与 `6.14.11-camera.efi` 是这台设备的外部文件，需要自行准备或改成自己的路径。
+
 电脑上的配置源为 `config/boot.conf`，配置包使用 `esp/EFI/visor/boot.conf`。要把配置源的修改打包，先同步：
 
 ```powershell
