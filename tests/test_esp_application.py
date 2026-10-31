@@ -5,11 +5,9 @@ import sys
 import tempfile
 import unittest
 import uuid
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import boot_inputs
-import fd_patch
 
 
 def make_fd(filesystem):
@@ -34,11 +32,23 @@ class PassthroughTests(unittest.TestCase):
                 image = root/'uefi.fd'
                 fd = make_fd(guid)
                 image.write_bytes(b'shim' + fd)
-                with patch.object(fd_patch, 'inspect_fd', side_effect=AssertionError('Must not inspect BDS')):
-                    selected, record = boot_inputs.load_uefi(image, None, root, fd_patch, passthrough=True)
+                selected, record = boot_inputs.load_uefi(image, None, root)
                 self.assertEqual(selected, fd)
                 self.assertEqual(record['fd_offset_in_payload'], 4)
                 self.assertEqual(image.read_bytes(), b'shim' + fd)
+
+    def test_ignore_false_signature_and_reject_ambiguous_fds(self):
+        fd = make_fd('8c8ce578-8a3d-4f1c-9935-896185c32dd3')
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            image = root/'uefi.img'
+            image.write_bytes(b'_FVH' + bytes(150) + fd)
+            selected, record = boot_inputs.load_uefi(image, None, root)
+            self.assertEqual(selected, fd)
+            self.assertEqual(record['fd_offset_in_payload'], 154)
+            image.write_bytes(fd + fd)
+            with self.assertRaisesRegex(ValueError, '唯一'):
+                boot_inputs.load_uefi(image, None, root)
 
     def test_reject_corrupt_outer_header_and_wrong_capacity(self):
         fd = make_fd('5473c07a-3dcb-4dca-bd6f-1e9689e7349a')

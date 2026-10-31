@@ -44,6 +44,8 @@ Android 使用普通 EFI 条目，kernel 指向配套 NabuAndroid.efi；Recovery
 
 横屏缓冲与背景缩放/颜色转换保留主分支已合并的绘制路径，视频解码、帧调度、主题和配置格式不改。提交按物理屏序复制局部区域，必要时通过固件 GOP Blt 回退，截图/录屏仍转换回逻辑横屏。
 
+输入适配使用菜单私有的 EFI_SYSTEM_TABLE 副本。替换副本 ConIn 后将 CRC32 清零，按 HeaderSize 调用固件 CalculateCrc32 重算；只有成功才进入 Visor。表长度必须匹配本分支使用的 64 位布局，缺少 CRC 服务或计算失败直接返回错误。固件原系统表不修改。
+
 Linux 的 nabu_action=linux 仍复用原版 rEFInd。生成并回读核对 nabu-selected.conf，保留原 refind.conf 的主题 include，通过 volume/loader/initrd/options 交接。rEFInd 的目录独立于主菜单 EFI/BOOT。
 
 本分支运行时原 BDS 已结束 DXE 初始化，不重复发送 EndOfDxe。使用固件已提供的系统表，不伪造 Project Silicium 厂商名；rEFInd 所需厂商字段缺失时返回错误，避免比较空指针。既有字段、版本及校验和不改。
@@ -60,10 +62,12 @@ boot_inputs / root_patch 的可选 Recovery、Magisk、KSU 处理保持主分支
 
 一键更新必须显式提供 NoSB --fd，仍在临时上游副本应用 NABU.patch。菜单与 Android 应用分别编译，没有共享的 EfiMain 入口；Recovery 处理链接在菜单内。适配维护在主仓库补丁/桥接中，不改子模块工作区。
 
-旧 boot_slot_build.py、port/boot-slot 等来源记录保留用于对照，不参与本分支的 build.py；不能据此宣称新镜像有 BootSlotDxe 保护。
+旧 FD 重写器、BootSlotDxe 构建/桥接及其测试仅保留在 secure-boot 分支。当前分支直接校验和使用原样 FD，没有内部模块重写路径；Linux 仅检查原 BDS 的元数据，不保留补写厂商或重新发送 EndOfDxe 的代码。Recovery 实现直接位于 nabu 平台层，不再在构建时把旧 Fastboot 实现替换成 Recovery。
 
 ## 校验
 
 tests/test_esp_application.py 检查 FFS2/FFS3 原样提取、内部 BDS 不依赖、错误头部/块映射拒绝。test_boot_inputs、test_patch_boot、test_build_publish 检查输入保护、FD 对齐、原始分流约定和发布回滚；test_linux_system.c 检查原 BDS 元数据保持不变、缺失字段拒绝且不写表。
+
+tests/test_platform_table.c 使用主机 CRC 与菜单桩核对修改输入指针后的系统表副本校验、原表不变，以及错误表长度、CRC 服务缺失/失败时不进入菜单。Linux 交接测试确认不会重新发送 DXE 结束通知。
 
 成品 manifest 记录真实的输入 FD 哈希、整个 FD 是否未改、PSCI 桥接、外部菜单路径与硬件验证状态。主机检查不代替 Android、Windows、Recovery、Linux 和重启标记保留的实机验证。

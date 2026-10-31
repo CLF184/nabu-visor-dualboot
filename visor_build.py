@@ -73,7 +73,7 @@ def flags(host=False):
     return (['-mstrict-align'] if not host else []) + [
         '-mno-ms-bitfields', '-std=c11', '-fshort-wchar', '-ffreestanding', '-fno-stack-protector',
         '-fno-strict-aliasing', '-mno-stack-arg-probe',
-        '-DNABU_EMBEDDED=1', '-DNABU_ESP_APPLICATION=1', '-Isrc', '-Isrc/compat', '-Ithird_party/visor/src/include',
+        '-DNABU_EMBEDDED=1', '-Isrc', '-Isrc/compat', '-Ithird_party/visor/src/include',
         '-Ithird_party/gnu-efi/inc', '-Ithird_party/gnu-efi/inc/aarch64', '-Ibuild',
         '-include', 'build/visor_features.h', f'-DVISOR_VERSION=L"{visor_version()}"',
         '-Os', '-Wno-incompatible-pointer-types']

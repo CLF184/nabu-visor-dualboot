@@ -6,6 +6,8 @@ import struct
 import subprocess
 import uuid
 
+FD_SIZE = 0x300000
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -50,7 +52,7 @@ def unpack(tool, image, directory):
 
 def validate_passthrough_fd(fd):
     """Validate the outer FV only: no driver discovery, decompression or rewrite."""
-    if len(fd) != 0x300000 or fd[40:44] != b'_FVH':
+    if len(fd) != FD_SIZE or fd[40:44] != b'_FVH':
         raise ValueError('Expected a 3 MiB nabu FD with an outer firmware volume')
     filesystems = ('8c8ce578-8a3d-4f1c-9935-896185c32dd3',
                    '5473c07a-3dcb-4dca-bd6f-1e9689e7349a')
@@ -75,7 +77,7 @@ def validate_passthrough_fd(fd):
     raise ValueError('Invalid firmware-volume block map')
 
 
-def load_uefi(path, tool, work, firmware, passthrough=False):
+def load_uefi(path, tool, work):
     source = path.read_bytes()
     container = 'fd'
     data = source
@@ -91,16 +93,11 @@ def load_uefi(path, tool, work, firmware, passthrough=False):
             break
         offset = signature + 4
         start = signature - 40
-        if start < 0 or start + firmware.FD_SIZE > len(data):
+        if start < 0 or start + FD_SIZE > len(data):
             continue
-        fd = data[start:start + firmware.FD_SIZE]
+        fd = data[start:start + FD_SIZE]
         try:
-            if passthrough:
-                validate_passthrough_fd(fd)
-            else:
-                info = firmware.inspect_fd(fd)
-                if info['bds_drivers'] != 1:
-                    continue
+            validate_passthrough_fd(fd)
         except (ValueError, struct.error):
             continue
         candidates.append((start, fd))

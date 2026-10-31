@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 """Shared verification of the official Nabu kernel/FD handoff before adding Renegade marker loops. Use build.py to generate an image."""
 from __future__ import annotations
-import argparse
 import hashlib
-import json
-import shutil
 import struct
-import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent

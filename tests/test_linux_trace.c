@@ -8,7 +8,7 @@ int visor_boot_services_active = 1;
 static EFI_FILE_PROTOCOL root, file;
 static char log_data[4096];
 static UINTN log_size, pos;
-static int roots, files, old, fail, load_calls, start_calls, table_begins, table_ends;
+static int roots, files, old, fail, load_calls, start_calls, table_begins;
 static EFI_STATUS expected;
 static char *strstr(const char *text,const char *needle) {
     for(;*text;text++){const char *a=text,*b=needle;while(*b && *a==*b){a++;b++;}if(!*b)return (char*)text;}return NULL;
@@ -40,7 +40,6 @@ static EFI_STATUS EFIAPI start_image(EFI_HANDLE image,UINTN *size,CHAR16 **data)
     start_calls++;return expected;
 }
 EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs,EFI_HANDLE image) { (void)bs;assert(image==(EFI_HANDLE)6);table_begins++;return EFI_SUCCESS; }
-void nabu_linux_table_end(void) {table_ends++;}
 int main(void) {
     #if !NABU_LINUX_TRACE
     EFI_BOOT_SERVICES bs={0};bs.LoadImage=load_image;bs.StartImage=start_image;
@@ -49,10 +48,10 @@ int main(void) {
     assert(nabu_linux_start_image(&bs,image,NULL,NULL)==expected && !table_begins);
     nabu_linux_trace_begin((void*)1,NULL);
     assert(nabu_linux_start_image(&bs,image,NULL,NULL)==expected);
-    assert(table_begins==1 && table_ends==1 && !roots && !files && !log_size);
+    assert(table_begins==1 && !roots && !files && !log_size);
     nabu_linux_trace_end();
     assert(nabu_linux_start_image(&bs,image,NULL,NULL)==expected && table_begins==1);
-    puts("Logging off: no ESP access; Linux metadata repair and original firmware status retained");
+    puts("Logging off: no ESP access; Linux metadata check and original firmware status retained");
     return 0;
     #else
     root.Open=open_file;root.Close=close_root;file.Close=close_file;file.Delete=del;

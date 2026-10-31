@@ -63,23 +63,11 @@ static EFI_STATUS EFIAPI read_input(SIMPLE_INPUT_INTERFACE *self, EFI_INPUT_KEY 
     return status;
 }
 
-/* Qualcomm ShutdownServices.h defines a packed 25-byte reset parameter:
- * CHAR16 DataBuffer[12] = L"RESET_PARAM", UINT8 Bdata = FASTBOOT_MODE (2).
- * ShutdownServices.c passes EFI_INVALID_PARAMETER for non-normal reasons.
- * No BCB writes, raw PMIC accesses or partition modifications are needed. */
+/* Recovery uses the standard bootloader request; other buttons keep their reset. */
+extern EFI_STATUS nabu_recovery_boot(void);
 EFI_STATUS nabu_power_action(int action) {
+    if(action==VISOR_ACTION_FIRMWARE) return nabu_recovery_boot();
     if(!RT || !RT->ResetSystem)return EFI_UNSUPPORTED;
-    if(action==VISOR_ACTION_FIRMWARE) {
-        EFI_GUID reason_guid={0xa022155a,0x4828,0x4535,{0xa4,0x99,0x11,0xf1,0x52,0x40,0xb9,0x1b}};
-        void *reason=NULL;
-        if(EFI_ERROR(BS->LocateProtocol(&reason_guid,NULL,&reason)) || !reason)return EFI_UNSUPPORTED;
-        UINT8 data[25]={0};
-        const CHAR16 *tag=L"RESET_PARAM";
-        for(UINTN i=0;i<11;i++){data[i*2]=(UINT8)tag[i];data[i*2+1]=(UINT8)(tag[i]>>8);}
-        data[24]=2;
-        RT->ResetSystem(EfiResetCold,EFI_INVALID_PARAMETER,sizeof(data),data);
-        return EFI_DEVICE_ERROR;
-    }
     RT->ResetSystem(action==VISOR_ACTION_SHUTDOWN?EfiResetShutdown:EfiResetCold,EFI_SUCCESS,0,NULL);
     return EFI_DEVICE_ERROR; /* EFI reset must not return. */
 }
@@ -96,12 +84,19 @@ static EFI_STATUS EFIAPI reset_input(SIMPLE_INPUT_INTERFACE *self,BOOLEAN verify
 }
 extern EFI_STATUS efi_main(EFI_HANDLE handle,EFI_SYSTEM_TABLE *table);
 EFI_STATUS nabu_visor_menu(EFI_HANDLE handle,EFI_SYSTEM_TABLE *table) {
+    if(!table || !table->BootServices)return EFI_INVALID_PARAMETER;
+    if(table->Hdr.HeaderSize!=sizeof(local_table) || !table->BootServices->CalculateCrc32)
+        return EFI_UNSUPPORTED;
     local_table=*table;ZeroMem(&local_input,sizeof(local_input));
     if(table->ConIn)local_input=*table->ConIn;
     local_input.ReadKeyStroke=read_input;local_input.Reset=reset_input;
     local_table.ConIn=&local_input;
+    local_table.Hdr.CRC32=0;
+    EFI_STATUS status=table->BootServices->CalculateCrc32(&local_table,
+        local_table.Hdr.HeaderSize,&local_table.Hdr.CRC32);
+    if(EFI_ERROR(status))return status;
     first_poll=1;last_poll=0;
-    EFI_STATUS status=efi_main(handle,&local_table);
+    status=efi_main(handle,&local_table);
     efi_log_close();active_state=NULL;nabu_font_release();nabu_landscape_end();
     return status;
 }

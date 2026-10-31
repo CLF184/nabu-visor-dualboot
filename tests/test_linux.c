@@ -80,20 +80,17 @@ EFI_STATUS visor_boot(boot_entry_t *e,EFI_SYSTEM_TABLE *st) {
     assert(e->hp_volume==refind_vol && !e->initrd_path && !e->has_sha256);
     return EFI_ABORTED;
 }
-static int event_open, event_signals, event_failure;
+static int event_signals;
 static EFI_STATUS EFIAPI create_event(UINT32 type, EFI_TPL tpl,
     EFI_EVENT_NOTIFY notify, const VOID *context, const EFI_GUID *group, EFI_EVENT *out) {
-    assert(type==EVT_NOTIFY_SIGNAL && tpl==TPL_CALLBACK && notify && !context);
-    assert(group->Data1==0x02ce967a && group->Data2==0xdd7e && group->Data3==0x4ffc);
-    if(event_failure==1)return EFI_OUT_OF_RESOURCES;
-    assert(!event_open);event_open=1;*out=(EFI_EVENT)3;return EFI_SUCCESS;
+    (void)type;(void)tpl;(void)notify;(void)context;(void)group;(void)out;
+    event_signals++;return EFI_UNSUPPORTED;
 }
 static EFI_STATUS EFIAPI signal_event(EFI_EVENT event) {
-    assert(event==(EFI_EVENT)3 && event_open);event_signals++;
-    return event_failure==2?EFI_DEVICE_ERROR:EFI_SUCCESS;
+    (void)event;event_signals++;return EFI_UNSUPPORTED;
 }
 static EFI_STATUS EFIAPI close_event(EFI_EVENT event) {
-    assert(event==(EFI_EVENT)3 && event_open);event_open=0;return EFI_SUCCESS;
+    (void)event;event_signals++;return EFI_UNSUPPORTED;
 }
 int main(void) {
     EFI_BOOT_SERVICES bs={0};bs.CreateEventEx=create_event;bs.SignalEvent=signal_event;bs.CloseEvent=close_event;
@@ -110,16 +107,12 @@ int main(void) {
     assert(saved[0]==0xfeff && contains(saved,L"volume \"12345678-1234-1234-1234-123456789abc\""));
     assert(contains(saved,L"initrd \"\\EFI\\ubuntu\\initrd.img\""));
     assert(contains(saved,L"test=\"\"a b\"\" #, unicode=中文"));
-    assert(event_signals==1 && !event_open);
+    assert(event_signals==0);
     same_volume=1;e.hp_volume=refind_vol;e.initrd_path=NULL;
     e.kernel_path=L"\\EFI\\fedora\\shim.efi";e.cmdline=NULL;
     assert(nabu_boot_linux(&e,&st)==EFI_ABORTED && loaded==2);
     assert(!contains(saved,L"volume ") && !contains(saved,L"initrd ") && !contains(saved,L"options "));
-    assert(event_signals==2 && !event_open);
-    for(event_failure=1;event_failure<=2;event_failure++) {
-        assert(EFI_ERROR(nabu_boot_linux(&e,&st)) && loaded==2 && !event_open);
-    }
-    event_failure=0;
+    assert(event_signals==0);
     for(failure=1;failure<=5;failure++) {
         have_old=1;assert(EFI_ERROR(nabu_boot_linux(&e,&st)));assert(loaded==2);
         assert(!pools && !files && !roots);

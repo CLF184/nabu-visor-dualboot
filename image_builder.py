@@ -144,10 +144,9 @@ def main():
         print('>', str(cmd[0]), ' '.join(map(str, cmd[1:4])), flush=True)
         subprocess.run(list(map(str, cmd)), cwd=cwd or root, env=env, check=True)
     vb = load(root/'visor_build.py', 'visor_build_candidate')
-    fp = load(root/'fd_patch.py', 'fd_patch_candidate')
     bp = load(root/'patch_boot.py', 'boot_patch_candidate')
     magisk = root/'tools/official/magiskboot.exe'
-    raw_fd, fd_input_record = load_uefi(base_fd, magisk, work, fp, passthrough=True)
+    raw_fd, fd_input_record = load_uefi(base_fd, magisk, work)
     print('[prepare] UEFI input verified; prepare optional Recovery/root inputs', flush=True)
     apk = args.magisk_apk or args.ksu_apk
     prepared_stock, preparation = prepare_boot(
@@ -245,7 +244,7 @@ def main():
     android_entry = bp.branch_target(struct.unpack_from('<I', original, entry_offset)[0], entry_offset)
     # The upstream patcher appends FD at a 16-byte boundary, but its implicit
     # padding is uninitialized. Supply zero padding without changing payload bytes.
-    fd_offset = fp.align(len(original), 16)
+    fd_offset = (len(original) + 15) & ~15
     if fd_offset != len(original):
         (boot_dir/'kernel').write_bytes(original + bytes(fd_offset - len(original)))
     run(official/'DualBootKernelPatcher-x86_64.exe', 'kernel', fd_path, 'patchedKernel',
@@ -272,7 +271,7 @@ def main():
     result_kernel[0x40:0x44] = branch(origin, 0x40)
     old_image_size = struct.unpack_from('<Q', patched, 16)[0]
     if old_image_size < len(result_kernel):
-        struct.pack_into('<Q', result_kernel, 16, fp.align(len(result_kernel), 4096))
+        struct.pack_into('<Q', result_kernel, 16, (len(result_kernel) + 4095) & ~4095)
     if result_kernel[0xb0:len(original)] != original[0xb0:]:
         raise ValueError('Android kernel payload was modified')
     if result_kernel[fd_offset:origin] != fd or result_kernel[0x70:0xb0] != patched[0x70:0xb0]:
@@ -336,12 +335,6 @@ def main():
                          'ramdisk_unchanged': not bool(args.recovery or apk),
                          'prepared_ramdisk_unchanged': True, 'original_fd_copy_and_entry_unchanged': True,
                          'repacked_kernel_matches': True},
-        'notes': ['Candidate only. No real Android boot has been verified.',
-                  'Both marker writer and reader must be installed as a pair.',
-                  'Original generic PSCI reset remains; no old Qualcomm reset driver is transplanted.',
-                  'Marker retention across this tablet reboot remains a hardware question.',
-                  'Visor UI, 5-second idle behavior, config/assets and Windows BDS are unchanged.',
-                  'Firmware/Fastboot button is outside this Android-only candidate and remains unresolved.'],
     }
     if args.recovery_port:
         manifest['recovery_protocol'] = {

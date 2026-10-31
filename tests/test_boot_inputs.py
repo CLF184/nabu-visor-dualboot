@@ -26,16 +26,6 @@ def cpio(files):
     return bytes(result)
 
 
-class Firmware:
-    FD_SIZE = 128
-
-    @staticmethod
-    def inspect_fd(data):
-        if not data.startswith(b'VALID-FD') or data[40:44] != b'_FVH':
-            raise ValueError('Bad FV')
-        return {'bds_drivers': 1}
-
-
 class InputTests(unittest.TestCase):
     def test_no_optional_files_keeps_existing_boot_exactly(self):
         with tempfile.TemporaryDirectory() as name:
@@ -57,21 +47,6 @@ class InputTests(unittest.TestCase):
         self.assertEqual(boot_inputs.cpio_entries(data)['init'], b'\0abc')
         with self.assertRaises(ValueError):
             boot_inputs.cpio_entries(data[:-112])
-
-    def test_uefi_selects_structurally_valid_fv_not_first_signature(self):
-        fd = bytearray(128)
-        fd[:8] = b'VALID-FD'
-        fd[40:44] = b'_FVH'
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            image = root / 'uefi.img'
-            image.write_bytes(b'_FVH' + bytes(150) + fd)
-            selected, record = boot_inputs.load_uefi(image, None, root, Firmware)
-            self.assertEqual(selected, bytes(fd))
-            self.assertEqual(record['fd_offset_in_payload'], 154)
-            image.write_bytes(fd + fd)
-            with self.assertRaisesRegex(ValueError, '唯一'):
-                boot_inputs.load_uefi(image, None, root, Firmware)
 
     def test_recovery_does_not_replace_kernel_or_write_sources(self):
         with tempfile.TemporaryDirectory() as name:

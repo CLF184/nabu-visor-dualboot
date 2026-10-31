@@ -104,6 +104,5 @@ EFI_STATUS nabu_linux_start_image(EFI_BOOT_SERVICES *bs, EFI_HANDLE image,
     nabu_linux_trace("StartImage.before", EFI_SUCCESS);
     status = bs->StartImage(image, exit_size, exit_data);
     nabu_linux_trace("StartImage.return", status);
-    if (linux) nabu_linux_table_end();
     return status;
 }
