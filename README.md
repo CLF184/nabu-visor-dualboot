@@ -65,19 +65,35 @@ py build.py --boot "E:\path\boot.img" --fd "E:\path\nabu-NoSB.img" --recovery "E
 | --- | --- |
 | nabu-visor-boot.img | Android 内核、入口分流器和原样 FD |
 | nabu-visor.fd | 与提取到的输入 FD 完全相同 |
-| NabuVisorMenu.efi | 独立菜单，安装为 EFI/BOOT/bootaa64.efi |
-| NabuAndroid.efi | 独立 Android 应用 |
-| nabu-visor-esp.zip、esp/ | 完整 ESP 包及展开目录 |
+| nabu-visor-esp.zip | 完整 ESP 安装包，包含所需菜单、Android EFI、配置和主题资源 |
+| esp/ | 上述安装包的展开目录 |
+| NabuVisorMenu.efi / NabuAndroid.efi | 顶层参考副本，已按安装路径包含在 ZIP 内，无需另外复制 |
 | RenegadeMarkerLoops.bin | 标记接收、原厂 Recovery / 关机充电识别 |
 | manifest.json / SHA256SUMS.txt | 来源、交接方式、检查结果和哈希 |
 
 菜单和 Android 程序均为 EFI application，每个 Zig 入口文件只导出一个 EfiMain。Recovery 直接使用菜单内的按钮处理，不生成独立应用或额外系统条目，也不生成菜单 DXE 或 BootSlotDxe。
 
+**需要放入 ESP 的本项目文件全部在 `nabu-visor-esp.zip` 中。** 包内目录已经整理好：
+
+```text
+EFI/
+├─ BOOT/
+│  └─ bootaa64.efi          菜单程序（NabuVisorMenu.efi 的安装名称）
+└─ visor/
+   ├─ NabuAndroid.efi       Android 启动程序
+   ├─ boot.conf             配置
+   ├─ boot.conf.example     配置语法参考
+   ├─ icons/、backgrounds/  图标与背景等主题资源
+   └─ refind/               已准备 Linux 资源时一并打包
+```
+
+工程 `esp/` 下准备的其他资源也会一起加入 ZIP。构建在发布前核对关键安装路径、文件内容和压缩包完整性；Windows、Linux 自身的引导文件由各系统安装时准备。
+
 ## 安装与回滚
 
 先备份现有 boot、ESP 的 EFI/BOOT/bootaa64.efi 和个人 EFI/visor 配置，确认 EFI/Microsoft/Boot/bootmgfw.efi 是微软引导程序。
 
-1. 解压 ESP 包，将 **EFI/visor 及 EFI/BOOT/bootaa64.efi 都复制到平板 ESP**。仅复制旧版配置目录不会安装新菜单。
+1. 解压 `nabu-visor-esp.zip`，把里面的 **整个 `EFI` 目录合并复制到平板 ESP 根目录**，覆盖本项目同名文件；无需再单独复制输出目录顶层的 EFI 程序。更新时先备份并合并自己的 `boot.conf` 和主题设置。
 2. 保留微软和 Linux EFI，Windows 不能指回菜单本身。不要通过覆盖微软 bootmgfw.efi 安装菜单。
 3. 核对当前槽位后刷入 boot。以下以 A 槽为例：
 

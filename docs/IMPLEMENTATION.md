@@ -56,6 +56,8 @@ boot_inputs / root_patch 的可选 Recovery、Magisk、KSU 处理保持主分支
 
 安装不仅要复制 EFI/visor，还要备份并替换 EFI/BOOT/bootaa64.efi；微软引导文件保持原样。Windows 安装脚本从默认 dist/esp 复制，最后替换回退 EFI。回滚先恢复原回退 EFI 和 boot，再移除 Visor 资源。
 
+所有需要安装到 ESP 的项目文件都包含在 nabu-visor-esp.zip，目录以 EFI 开始；菜单副本按 EFI/BOOT/bootaa64.efi 命名，Android 程序、配置、主题及准备好的 rEFInd 资源位于 EFI/visor。顶层两个 EFI 文件是参考副本，不需要在 ZIP 之外额外安装。发布前核对关键路径、字节内容和整个 ZIP 的 CRC，manifest 记录安装方式和已核对的文件。
+
 一键更新必须显式提供 NoSB --fd，仍在临时上游副本应用 NABU.patch。菜单与 Android 应用分别编译，没有共享的 EfiMain 入口；Recovery 处理链接在菜单内。适配维护在主仓库补丁/桥接中，不改子模块工作区。
 
 旧 boot_slot_build.py、port/boot-slot 等来源记录保留用于对照，不参与本分支的 build.py；不能据此宣称新镜像有 BootSlotDxe 保护。

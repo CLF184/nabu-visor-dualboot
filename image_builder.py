@@ -301,6 +301,16 @@ def main():
         for file in sorted(esp_tree.rglob('*')):
             if file.is_file():
                 z.write(file, file.relative_to(esp_tree).as_posix())
+    # The ZIP is the complete ESP installation unit; top-level EFI files are
+    # reference copies. Check their installed names and bytes before publishing.
+    with zipfile.ZipFile(archive) as z:
+        for name, source in (('EFI/BOOT/bootaa64.efi', menu_app),
+                             ('EFI/visor/NabuAndroid.efi', app),
+                             ('EFI/visor/boot.conf', esp/'boot.conf')):
+            if z.read(name) != source.read_bytes():
+                raise ValueError('ESP ZIP missing or mismatched installation file: '+name)
+        if z.testzip():
+            raise ValueError('ESP ZIP failed integrity verification')
     manifest = {
         'device': 'xiaomi-nabu', 'status': 'CANDIDATE_NOT_HARDWARE_TESTED', 'hardware_tested': False,
         'architecture': 'esp-application',
@@ -310,7 +320,9 @@ def main():
         'input_preparation': preparation,
         'output_boot': {'file': image_path.name, 'sha256': sha(boot), 'size': len(boot)},
         'output_fd': {'file': fd_path.name, 'sha256': sha(fd)},
-        'esp_package': {'file': archive.name, 'sha256': sha(archive.read_bytes())},
+        'esp_package': {'file': archive.name, 'sha256': sha(archive.read_bytes()),
+                        'installation': 'Extract the EFI directory to the ESP root; no additional top-level EFI files are needed',
+                        'required_files_verified': ['EFI/BOOT/bootaa64.efi', 'EFI/visor/NabuAndroid.efi', 'EFI/visor/boot.conf']},
         'android_protocol': {'address': '0x17FE00000', 'value_u16': '0x5241', 'count': 128,
                              'cache': 'write-back and invalidate of 256 bytes', 'reset': 'PSCI SYSTEM_RESET 0x84000009 via private Renegade runtime-services copy',
                              'reader': 'scan 128 halfwords; any match clears all 256 bytes then branches to Android'},
@@ -412,6 +424,7 @@ def main():
         raise ValueError('Build outputs must not overwrite the input boot or FD')
     backup = publish_files(replacements, output_dir/'.build-backup')
     print('Published validated build. Previous files: '+str(backup), flush=True)
+    print('ESP 安装包：'+str(output_dir/archive.name)+'；解压后将 EFI 目录复制到 ESP 根目录，无需另行复制顶层 EFI 文件。', flush=True)
     print(json.dumps({k: manifest[k] for k in ('status','output_boot','output_fd','kernel')}, indent=2), flush=True)
 
 _build_workspace = None
