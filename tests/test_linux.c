@@ -71,9 +71,8 @@ efi_file_buffer_t *efi_load_file_on_handle(EFI_HANDLE h, CHAR16 *path) {
     buf->size=sizeof(text)-1;buf->data=efi_allocate_pool(buf->size);
     memcpy(buf->data,text,buf->size);return buf;
 }
-void nabu_linux_trace_begin(EFI_HANDLE volume,EFI_SYSTEM_TABLE *st) { assert(volume==refind_vol);(void)st; }
-void nabu_linux_trace_end(void) {}
-void nabu_linux_trace(const char *stage,EFI_STATUS status) { (void)stage;(void)status; }
+void nabu_linux_handoff_begin(void) {}
+void nabu_linux_handoff_end(void) {}
 EFI_STATUS visor_boot(boot_entry_t *e,EFI_SYSTEM_TABLE *st) {
     (void)st;loaded++;assert(!pools && !roots && !files);
     assert(eq(e->kernel_path,REFIND_IMAGE));assert(eq(e->cmdline,L"refind -c nabu-selected.conf"));

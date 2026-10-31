@@ -459,32 +459,19 @@ diff --git a/src/gui/gui_intro.c b/src/gui/gui_intro.c
 diff --git a/src/boot/linux_boot.c b/src/boot/linux_boot.c
 --- a/src/boot/linux_boot.c
 +++ b/src/boot/linux_boot.c
-@@ -1,5 +1,15 @@
+@@ -1,5 +1,11 @@
  /* linux_boot.c - the boot handover: verify, register initrd, StartImage */
  #include "linux_internal.h"
 +#ifdef NABU_EMBEDDED
 +#include "nabu_visor.h"
-+#define NABU_LOAD_IMAGE(...) nabu_linux_load_image(BS, __VA_ARGS__)
 +#define NABU_START_IMAGE(...) nabu_linux_start_image(BS, __VA_ARGS__)
-+#define NABU_TRACE(stage, status) nabu_linux_trace(stage, status)
 +#else
-+#define NABU_LOAD_IMAGE(...) BS->LoadImage(__VA_ARGS__)
 +#define NABU_START_IMAGE(...) BS->StartImage(__VA_ARGS__)
-+#define NABU_TRACE(stage, status) ((void)0)
 +#endif
 
  static int linux_is_pe_image(const UINT8 *data, UINTN size) {
      if (!data || size < 0x40 || data[0] != 'M' || data[1] != 'Z') return 0;
-@@ -30,7 +40,7 @@
-             return EFI_NOT_FOUND;
-         }
-         EFI_HANDLE bh;
--        status = BS->LoadImage(FALSE, IH, bootmgr_dp, NULL, 0, &bh);
-+        status = NABU_LOAD_IMAGE(FALSE, IH, bootmgr_dp, NULL, 0, &bh);
-         efi_free_pool(bootmgr_dp);
-         if (EFI_ERROR(status)) {
-             { CHAR16 m[96]; SPrint(m, sizeof(m),
-@@ -43,7 +53,7 @@
+@@ -43,7 +49,7 @@
          }
          efi_log(L"boot: StartImage() - handing control to Windows Boot Manager");
          efi_log_close();
@@ -493,64 +480,7 @@ diff --git a/src/boot/linux_boot.c b/src/boot/linux_boot.c
      }
 
      efi_log(L"boot: loading kernel/image file");
-@@ -65,6 +75,7 @@
-         clear_entry_password(entry);
-         return EFI_NOT_FOUND;
-     }
-+    NABU_TRACE("image.read", EFI_SUCCESS);
-     void *kernel_data = kernel_buf->data;
-     kernel_size = kernel_buf->size;
-
-@@ -77,6 +88,7 @@
-
-     int sb = efi_secure_boot_enabled();
-     int shim = efi_shim_verify(kernel_data, kernel_size);
-+    NABU_TRACE("shim.result.plus1", (EFI_STATUS)(shim + 1));
-     if (shim == 0) {
-         efi_log(L"ERROR: SHIM_LOCK verification failed - refusing to boot image");
-         efi_print(L"Secure Boot: image verification failed\r\n");
-@@ -153,7 +165,7 @@
-         if (kernel_dp) {
-
-             efi_log(L"boot: LoadImage() from the copy already in memory");
--            status = BS->LoadImage(FALSE, IH, kernel_dp, kernel_data, kernel_size,
-+            status = NABU_LOAD_IMAGE(FALSE, IH, kernel_dp, kernel_data, kernel_size,
-                                    &kernel_handle);
-             if (EFI_ERROR(status) && status != EFI_SECURITY_VIOLATION &&
-                 status != EFI_ACCESS_DENIED && dp_may_be_reread) {
-@@ -164,7 +176,7 @@
-                        L"letting the firmware read the file",
-                        (long)status);
-                 efi_log(m);
--                status = BS->LoadImage(FALSE, IH, kernel_dp, NULL, 0, &kernel_handle);
-+                status = NABU_LOAD_IMAGE(FALSE, IH, kernel_dp, NULL, 0, &kernel_handle);
-             }
-             efi_free_pool(kernel_dp);
-             if (EFI_ERROR(status) && status != EFI_SECURITY_VIOLATION &&
-@@ -175,12 +187,12 @@
-                        L"WARN: LoadImage(devpath) failed (status=0x%lx) - retrying from buffer",
-                        (long)status);
-                 efi_log(m);
--                status = BS->LoadImage(FALSE, IH, NULL, kernel_data, kernel_size,
-+                status = NABU_LOAD_IMAGE(FALSE, IH, NULL, kernel_data, kernel_size,
-                                        &kernel_handle);
-             }
-         } else {
-             efi_log(L"WARN: could not build device path - loading from source buffer");
--            status = BS->LoadImage(FALSE, IH, NULL, kernel_data, kernel_size, &kernel_handle);
-+            status = NABU_LOAD_IMAGE(FALSE, IH, NULL, kernel_data, kernel_size, &kernel_handle);
-         }
-         if (EFI_ERROR(status)) {
-             { CHAR16 m[96]; SPrint(m, sizeof(m),
-@@ -212,6 +224,7 @@
-         if (boot_cmdline) {
-             EFI_LOADED_IMAGE *loaded;
-             status = BS->HandleProtocol(kernel_handle, &gEfiLoadedImageProtocolGuid, (void**)&loaded);
-+            NABU_TRACE("LoadedImage.protocol", status);
-             if (!EFI_ERROR(status)) {
-                 loaded->LoadOptions     = boot_cmdline;
-                 loaded->LoadOptionsSize = (UINT32)((efi_strlen16(boot_cmdline) + 1) * sizeof(CHAR16));
-@@ -305,7 +318,7 @@
+@@ -305,7 +311,7 @@
          efi_log(L"linux: StartImage() - handing control to kernel stub");
          efi_log_close();
          clear_entry_password(entry);

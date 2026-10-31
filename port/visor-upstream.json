@@ -2,7 +2,7 @@
   "repo": "https://github.com/IO-ZetZor/Visor-BootManager.git",
   "commit": "71a05b5945e37903cfeeaf69c76220fdf5861ac9",
   "ref": "71a05b5945e37903cfeeaf69c76220fdf5861ac9",
-  "patch_sha256": "d4401126b058787f08a4281c3d92a5534e5f7c9b359b25646dce6284e6b933bc",
+  "patch_sha256": "c1a92d2efb9041dd2ff818c35bcb04d684949e427158ea4eba25411d8fca32a6",
   "tree_sha256": "e68fdf40010dfadfbf793b67d904b8372511ebe02a11ba5536c11884bfd245ea",
   "tree_hash_format": "sorted paths and SHA256; UTF8 text line endings canonicalized to LF; .git excluded"
 }

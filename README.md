@@ -175,7 +175,7 @@ py update_visor.py --fd "E:\path\nabu-NoSB.img"
 
 追加 --check-only 只检查，或 --boot 更换基础 boot。更新脚本检查并重用移植补丁，失败不发布；GNU-EFI、Renegade 保持固定版本。详见 [更新说明](docs/UPSTREAM_UPDATE.md)。
 
-只更新菜单程序或主题时复制 ESP 文件；Android 内核、Recovery/root、FD 或分流器改变时重新生成并刷入 boot。默认关闭 Visor、Linux 交接、rEFInd 文件日志，保留启动错误提示；旧日志不会自动删除。
+只更新菜单程序或主题时复制 ESP 文件；Android 内核、Recovery/root、FD 或分流器改变时重新生成并刷入 boot。Visor、rEFInd 文件日志保持关闭，Linux 交接已移除文件日志实现，保留启动错误提示；旧日志不会自动删除。
 
 ## 来源与许可
 

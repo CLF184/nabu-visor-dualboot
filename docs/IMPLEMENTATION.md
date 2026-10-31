@@ -42,6 +42,8 @@ Android 使用普通 EFI 条目，kernel 指向配套 NabuAndroid.efi；Recovery
 
 保留完整 ARM64 功能清单、横屏适配、音量键选择/电源键松开确认，以及 5 秒无操作自动 Android 的原有逻辑。
 
+按键控制器仅负责启动按键过滤、持续按键抑制及松开确认；系统选择和倒计时由 Visor 原生事件循环负责。旧双系统选中状态和独立倒计时已移除。
+
 横屏缓冲与背景缩放/颜色转换保留主分支已合并的绘制路径，视频解码、帧调度、主题和配置格式不改。提交按物理屏序复制局部区域，必要时通过固件 GOP Blt 回退，截图/录屏仍转换回逻辑横屏。
 
 输入适配使用菜单私有的 EFI_SYSTEM_TABLE 副本。替换副本 ConIn 后将 CRC32 清零，按 HeaderSize 调用固件 CalculateCrc32 重算；只有成功才进入 Visor。表长度必须匹配本分支使用的 64 位布局，缺少 CRC 服务或计算失败直接返回错误。固件原系统表不修改。
@@ -50,7 +52,7 @@ Linux 的 nabu_action=linux 仍复用原版 rEFInd。生成并回读核对 nabu-
 
 本分支运行时原 BDS 已结束 DXE 初始化，不重复发送 EndOfDxe。使用固件已提供的系统表，不伪造 Project Silicium 厂商名；rEFInd 所需厂商字段缺失时返回错误，避免比较空指针。既有字段、版本及校验和不改。
 
-保留 Linux 动作对加密/固定哈希等无法转交约束的拒绝行为，普通 Visor 条目的功能仍保留。Visor、Linux 交接、rEFInd 的文件日志默认关闭。
+保留 Linux 动作对加密/固定哈希等无法转交约束的拒绝行为，普通 Visor 条目的功能仍保留。Linux 文件日志及其开关已删除，LoadImage 使用上游原调用；src/visor_linux_efi.c 只在 rEFInd 交接期间检查元数据并原样调用 StartImage。Visor、rEFInd 的文件日志保持关闭。
 
 ## 构建、安装与更新
 
@@ -71,3 +73,14 @@ tests/test_esp_application.py 检查 FFS2/FFS3 原样提取、内部 BDS 不依�
 tests/test_platform_table.c 使用主机 CRC 与菜单桩核对修改输入指针后的系统表副本校验、原表不变，以及错误表长度、CRC 服务缺失/失败时不进入菜单。Linux 交接测试确认不会重新发送 DXE 结束通知。
 
 成品 manifest 记录真实的输入 FD 哈希、整个 FD 是否未改、PSCI 桥接、外部菜单路径与硬件验证状态。主机检查不代替 Android、Windows、Recovery、Linux 和重启标记保留的实机验证。
+
+manifest_version=2 将 Android/Recovery 共用的标记及重启方式集中在 android_protocol，Recovery 通过 handoff 字段引用；原生 Recovery 与充电的共同规则集中在 native_boot_protocol，不再重复记录长段说明。文件日志状态集中在 file_logging；输入来源、内容哈希和检查结果继续保留。
+
+主机测试统一放在 tests/：按键测试为 test_controller.zig，Recovery BCB 测试为 test_recovery.c，Linux EFI 交接测试为 test_linux_efi.c。src/ 和 port/ 不包含测试程序。按键与 Recovery 测试可在项目根目录运行：
+
+```powershell
+New-Item -ItemType Directory -Force build | Out-Null
+& .\tools\python\ziglang\zig.exe test --dep controller "-Mroot=tests/test_controller.zig" "-Mcontroller=src/controller.zig" --cache-dir build/zig-tests
+& .\tools\python\ziglang\zig.exe cc tests/test_recovery.c port/recovery/recovery.c -o build/test-recovery.exe -fshort-wchar -mno-ms-bitfields -Ithird_party/gnu-efi/inc -Ithird_party/gnu-efi/inc/x86_64
+& .\build\test-recovery.exe
+```

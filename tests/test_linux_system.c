@@ -6,7 +6,6 @@
 static EFI_SYSTEM_TABLE table;
 static EFI_LOADED_IMAGE loaded;
 static EFI_STATUS protocol_status;
-void nabu_linux_trace(const char *stage,EFI_STATUS status) {(void)stage;(void)status;}
 static EFI_STATUS EFIAPI protocol(EFI_HANDLE image,EFI_GUID *guid,VOID **out) {
     assert(image==(EFI_HANDLE)1 && guid->Data1==0x5b1b31a1);
     *out=&loaded;return protocol_status;

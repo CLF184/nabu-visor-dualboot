@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * Host-only mock of UEFI storage. No physical disks or devices are opened.
+ * Host-only Recovery BCB test. No physical disks or devices are opened.
  */
 #define GNU_EFI_SETJMP_H
 #include <efi.h>

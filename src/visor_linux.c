@@ -180,10 +180,8 @@ done:
     bridge.cmdline = L"refind -c nabu-selected.conf";
     bridge.hp_volume = refind_volume;
     /* Preserve Visor's LoadImage/StartImage and firmware signature checks. */
-    nabu_linux_trace_begin(refind_volume, st);
-    nabu_linux_trace("config.verified", EFI_SUCCESS);
+    nabu_linux_handoff_begin();
     status = visor_boot(&bridge, st);
-    nabu_linux_trace("visor_boot.return", status);
-    nabu_linux_trace_end();
+    nabu_linux_handoff_end();
     return status;
 }

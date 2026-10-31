@@ -311,6 +311,7 @@ def main():
         if z.testzip():
             raise ValueError('ESP ZIP failed integrity verification')
     manifest = {
+        'manifest_version': 2,
         'device': 'xiaomi-nabu', 'status': 'CANDIDATE_NOT_HARDWARE_TESTED', 'hardware_tested': False,
         'architecture': 'esp-application',
         'upstream': {'repo': 'https://github.com/edk2-porting/edk2-msm', 'commit': COMMIT, 'sources': sources},
@@ -324,12 +325,14 @@ def main():
                         'required_files_verified': ['EFI/BOOT/bootaa64.efi', 'EFI/visor/NabuAndroid.efi', 'EFI/visor/boot.conf']},
         'android_protocol': {'address': '0x17FE00000', 'value_u16': '0x5241', 'count': 128,
                              'cache': 'write-back and invalidate of 256 bytes', 'reset': 'PSCI SYSTEM_RESET 0x84000009 via private Renegade runtime-services copy',
-                             'reader': 'scan 128 halfwords; any match clears all 256 bytes then branches to Android'},
+                             'reader': 'any marker match clears the 256-byte marker area and continues the original kernel',
+                             'marker_retention': 'firmware-dependent; requires hardware testing'},
         'kernel': {'original_size': len(original), 'fd_offset': fd_offset,
                    'padding_size': fd_offset - len(original), 'helper_offset': origin,
                    'helper_size': len(helper), 'android_entry': hex(android_entry), 'sha256': sha(result_kernel)},
         'verification': {'original_executable_firmware_modules_unchanged': True,
                          'entire_fd_unchanged': fd == raw_fd,
+                         'secure_boot_policy_changed': False,
                          'original_generic_psci_reset_retained': True,
                          'original_android_payload_unchanged': not bool(args.recovery or apk),
                          'ramdisk_unchanged': not bool(args.recovery or apk),
@@ -343,8 +346,7 @@ def main():
             'fields_changed': [[0, 32], [64, 832]],
             'other_bytes': 'preserved, including 4 KiB block tail',
             'before_reset': 'write, flush, read back and compare',
-            'menu_bypass': 'original Renegade 128-marker writer, cache clean, PSCI reset through private runtime-services copy',
-            'reset': 'PSCI SYSTEM_RESET 0x84000009',
+            'handoff': 'android_protocol',
             'failure': 'restore original request and show error; no reboot on write failure',
             'target': 'Recovery ramdisk included from --recovery' if args.recovery else 'Recovery already installed on tablet; no Recovery image replacement',
         }
@@ -353,49 +355,31 @@ def main():
         }
         manifest['recovery_sources']['port/recovery/recovery.c'] = sha(recovery_sources[0].read_bytes())
         manifest['recovery_sources']['port/recovery/native_entry.S'] = sha(native_entry.read_bytes())
-        manifest['native_recovery_protocol'] = {
+        manifest['native_boot_protocol'] = {
             'input': 'original bootloader FDT pointer in x0, before the Nabu FD handoff',
-            'recognition': 'valid bounded v17 FDT; root model NABU; chosen/bootargs has androidboot.hardware=qcom and omits androidboot.force_normal_boot=1',
+            'validation': 'bounded v17 FDT, root model NABU, chosen/bootargs contains androidboot.hardware=qcom',
             'action': 'use the unchanged Renegade clear loop then branch to the original kernel; no BCB write or reset',
             'preserved': 'x0-x3, original FDT and ramdisk; no stack required',
             'fallback': 'invalid or unrecognised FDT continues the existing FD/Visor flow; no boot-time BCB detection',
-            'scope': 'nabu recovery-as-boot using kernel command-line parameters; not a bootconfig parser',
+            'modes': {'recovery': 'androidboot.force_normal_boot=1 is absent',
+                      'charger': 'complete androidboot.mode=charger token; takes priority over force_normal_boot'},
+            'scope': 'nabu kernel command-line parameters; no bootconfig parser or battery threshold',
         }
-        manifest['native_charger_protocol'] = {
-            'input': 'original bootloader FDT pointer in x0, before the Nabu FD handoff',
-            'recognition': 'valid bounded v17 FDT; root model NABU; chosen/bootargs has androidboot.hardware=qcom and the complete androidboot.mode=charger token',
-            'priority': 'charger mode bypasses the menu even when androidboot.force_normal_boot=1 is present',
-            'action': 'continue the original Android kernel through the unchanged marker-clear loop; no reset or BCB write',
-            'preserved': 'original x0-x3, FDT, ramdisk and Android charger implementation',
-            'scope': 'nabu bootloader command-line charger mode; not a battery threshold or bootconfig parser',
-        }
-        manifest['notes'] = [
-            'Newly generated image; requires hardware verification even though the released implementation was tested.',
-            'Android uses the same paired Renegade markers previously verified by the user.',
-            'Visor is an ESP EFI application loaded by the original BDS; Windows uses the ordinary Visor EFI loader.',
-            'The bottom-left Recovery button writes the BCB and reuses the paired Renegade marker/PSCI reset bridge; no separate Recovery application or entry.',
-            'Native Recovery boot context from the original FDT bypasses Visor without an additional reboot, including the power/volume-up path. The previous build was confirmed for keys; this generated image still requires verification.',
-            'Recovery ramdisk is included from the selected image.' if args.recovery else 'No Recovery ramdisk was supplied; the installed Recovery is used.',
-            'Entire input FD is preserved: no menu/BDS hook, no injected BootSlotDxe and no reset-driver replacement.',
-            'Requires firmware that permits the unsigned ESP applications (NoSB); this build does not disable Secure Boot or change certificates.',
-            'PSCI marker retention and all system handoffs require testing on the selected firmware.',
-        ]
     manifest['linux_protocol'] = {
         'action': 'nabu_action=linux', 'loader': r'\EFI\visor\refind\bootaa64.efi',
         'config': r'\EFI\visor\refind\nabu-selected.conf',
         'adapter_sha256': sha((root/'src/visor_linux.c').read_bytes()),
         'stage': 'Original BDS has already initialized the boot environment; no repeated EndOfDxe notification',
-        'trace': r'\EFI\visor\refind\nabu-handoff.log',
-        'trace_enabled': False, 'refind_log_level': 0, 'visor_file_log_enabled': False,
-        'trace_sha256': sha((root/'src/visor_linux_trace.c').read_bytes()),
+        'handoff_sha256': sha((root/'src/visor_linux_efi.c').read_bytes()),
         'system_table': 'use original BDS metadata; reject missing vendor without inventing firmware identity',
         'system_table_sha256': sha((root/'src/visor_linux_system.c').read_bytes()),
-        'secure_boot_policy_changed': False, 'hardware_tested': False,
     }
     manifest['boot_slot_protocol'] = {'injected': False, 'behavior': 'unchanged input firmware only; no additional slot maintenance'}
     manifest['menu_application'] = {'path': r'\EFI\BOOT\bootaa64.efi', 'sha256': sha(menu_app.read_bytes()),
+                                    'requires_nosb': True,
                                     'recovery': 'bottom-left power action; no separate EFI application',
                                     'windows': 'ordinary LoadImage/StartImage of the configured bootmgfw.efi'}
+    manifest['file_logging'] = {'visor': False, 'linux_handoff': False, 'refind_level': 0}
     refind_binary = esp/'refind/bootaa64.efi'
     if refind_binary.is_file():
         manifest['linux_protocol']['refind_sha256'] = sha(refind_binary.read_bytes())

@@ -11,7 +11,6 @@ EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs, EFI_HANDLE image) {
     if (EFI_ERROR(status)) return status;
     if (!loaded || !loaded->SystemTable) return EFI_INVALID_PARAMETER;
     EFI_SYSTEM_TABLE *table = loaded->SystemTable;
-    nabu_linux_trace("SystemTable.vendor.missing", table->FirmwareVendor ? 0 : 1);
     if (table->FirmwareVendor) return EFI_SUCCESS;
     return EFI_UNSUPPORTED;
 }

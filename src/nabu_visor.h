@@ -8,12 +8,8 @@
 #define NABU_ACTION_LINUX   3  /* 原版 rEFInd 处理选中的 Linux EFI 条目 */
 
 EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs, EFI_HANDLE image);
-void nabu_linux_trace_begin(EFI_HANDLE volume, EFI_SYSTEM_TABLE *st);
-void nabu_linux_trace_end(void);
-void nabu_linux_trace(const char *stage, EFI_STATUS status);
-EFI_STATUS nabu_linux_load_image(EFI_BOOT_SERVICES *bs, BOOLEAN policy,
-    EFI_HANDLE parent, EFI_DEVICE_PATH *path, VOID *buffer, UINTN size,
-    EFI_HANDLE *image);
+void nabu_linux_handoff_begin(void);
+void nabu_linux_handoff_end(void);
 EFI_STATUS nabu_linux_start_image(EFI_BOOT_SERVICES *bs, EFI_HANDLE image,
     UINTN *exit_size, CHAR16 **exit_data);
 
