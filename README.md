@@ -1,6 +1,6 @@
 # nabu Visor 多系统启动菜单
 
-**推荐使用当前默认分支 `esp-application`。** 本分支参考 [Issue #1 的修复方案](https://github.com/CLF184/nabu-visor-dualboot/issues/1#issuecomment-6538193058)：FD 保持原样，由原固件从 ESP 加载 Visor。Android、Windows、Recovery 使用独立 EFI 启动项，Linux 保留 rEFInd 接入。
+**推荐使用当前默认分支 `esp-application`。** 本分支参考 [Issue #1 的修复方案](https://github.com/CLF184/nabu-visor-dualboot/issues/1#issuecomment-6538193058)：FD 保持原样，由原固件从 ESP 加载 Visor。Android、Windows 使用独立 EFI 启动项，Recovery 使用左下角按钮，Linux 保留 rEFInd 接入。
 
 **需要允许未签名 EFI 应用的 nabu NoSB 固件，Windows 的 Secure Boot 保护也会关闭。** 工具不会自动关闭 Secure Boot、修改证书或把普通固件转换为 NoSB。
 
@@ -14,7 +14,7 @@ ABL → 多系统 boot 的入口分流器
       └ 原样 NoSB UEFI → 原 BDS → EFI/BOOT/bootaa64.efi（Visor）
                                  ├ Android → NabuAndroid.efi → 标记＋PSCI 重启
                                  ├ Windows → 微软 bootmgfw.efi
-                                 ├ Recovery → NabuRecovery.efi → BCB＋标记＋PSCI 重启
+                                 ├ 左下角 Recovery 按钮 → BCB＋标记＋PSCI 重启
                                  └ Linux → 原版 rEFInd → 所选 EFI/内核
 ```
 
@@ -66,12 +66,12 @@ py build.py --boot "E:\path\boot.img" --fd "E:\path\nabu-NoSB.img" --recovery "E
 | nabu-visor-boot.img | Android 内核、入口分流器和原样 FD |
 | nabu-visor.fd | 与提取到的输入 FD 完全相同 |
 | NabuVisorMenu.efi | 独立菜单，安装为 EFI/BOOT/bootaa64.efi |
-| NabuAndroid.efi / NabuRecovery.efi | 独立 Android / Recovery 应用 |
+| NabuAndroid.efi | 独立 Android 应用 |
 | nabu-visor-esp.zip、esp/ | 完整 ESP 包及展开目录 |
 | RenegadeMarkerLoops.bin | 标记接收、原厂 Recovery / 关机充电识别 |
 | manifest.json / SHA256SUMS.txt | 来源、交接方式、检查结果和哈希 |
 
-三个程序均为 EFI application，每个 Zig 入口文件只导出一个 EfiMain。不生成菜单 DXE 或 BootSlotDxe。
+菜单和 Android 程序均为 EFI application，每个 Zig 入口文件只导出一个 EfiMain。Recovery 直接使用菜单内的按钮处理，不生成独立应用或额外系统条目，也不生成菜单 DXE 或 BootSlotDxe。
 
 ## 安装与回滚
 
@@ -97,7 +97,7 @@ fastboot reboot
 
 ## 配置与主题
 
-仍读取平板 ESP 的 **\EFI\visor\boot.conf**。Android、Windows、Recovery 使用真实 EFI 路径，不再配置 nabu_action=android / bds：
+仍读取平板 ESP 的 **\EFI\visor\boot.conf**。Android、Windows 使用真实 EFI 路径，Recovery 由左下角按钮进入：
 
 ```ini
 file_log=0
@@ -117,13 +117,9 @@ entry {
     name=Windows
     kernel=\EFI\Microsoft\Boot\bootmgfw.efi
 }
-entry {
-    name=Recovery
-    kernel=\EFI\visor\NabuRecovery.efi
-}
 ```
 
-旧配置的 android/bds 值不再截获启动，使用真实 kernel 路径；**必须更新配套 Android EFI，不能继续用旧版热重启程序**。标题、背景、图标及字体沿用 Visor 格式，完整语法见 boot.conf.example。
+`nabu_action` 仅支持 Linux 的 `linux` 值，不兼容旧版 `android/bds/windows` 动作配置。Android、Windows 使用上面的普通条目，并安装配套 Android EFI。标题、背景、图标及字体沿用 Visor 格式，完整语法见 boot.conf.example。
 
 配置包使用工程 esp/EFI/visor/boot.conf；修改 config/boot.conf 后可先同步再构建：
 
@@ -131,7 +127,7 @@ entry {
 Copy-Item .\config\boot.conf .\esp\EFI\visor\boot.conf
 ```
 
-[三系统参考配置](config/examples/nabu-tripleboot.conf) 保留 Ubuntu 和注释的 Arch 路径，并按本分支改用独立 EFI。自定义背景和 Linux 文件须自行准备。
+[当前实机三系统配置](config/examples/nabu-tripleboot.conf) 保留 Android、Windows、Ubuntu 三项，Recovery 仅使用左下角按钮；包含隐藏标题与 EFI 路径、自定义 bg_custom.png 背景和已注释的 Arch 示例。它仅作参考，不会自动替换默认配置或加入构建包。使用时保存为平板 ESP 的 EFI/visor/boot.conf，并自行准备背景及对应 Linux EFI，或修改为自己的路径。
 
 ## Linux：保留 rEFInd
 

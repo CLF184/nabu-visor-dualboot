@@ -22,7 +22,7 @@ Renegade 固定为 e1952621f419f8db60ed28271264e1b5184c571d，原版 Reboot2Payl
 
 ## Recovery 与充电
 
-独立 NabuRecovery.efi 只链接 src/recovery_app.zig、GNU-EFI、现有 recovery.c 和标记/PSCI 桥接，不链接菜单入口。入口先 InitializeLib，设置 BS、RT、ST、LibImageHandle 等 GNU-EFI 全局，然后调用 nabu_recovery_boot。左下角 Recovery 按钮仍复用同一个 BCB 实现。
+Recovery 仅保留左下角按钮。菜单初始化 GNU-EFI 全局后，通过 nabu_power_action 调用现有 recovery.c 的 nabu_recovery_boot，复用标记/PSCI 桥接。不生成独立 Recovery EFI 或系统条目。
 
 按 GPT 名找到唯一 misc 逻辑分区，仅更新 command[32] 为 boot-recovery、recovery[768] 为 recovery 换行；status、stage、其他数据及 4 KiB 块尾保留。写入、刷新、读回核对后才写标记并 PSCI 复位。请求写入失败则尝试恢复，不重启；恢复失败保留错误提示。
 
@@ -34,7 +34,7 @@ Recovery 的实际硬件支持由所选 Android 内核、设备树、固件和 r
 
 Windows 使用 Visor 原版 LoadImage / StartImage 加载配置的 EFI/Microsoft/Boot/bootmgfw.efi，不交还 BDS，也不自动跳到固件默认系统。
 
-Android 和 Recovery 也使用普通 EFI 条目，kernel 必须指向新的 NabuAndroid.efi / NabuRecovery.efi。本分支保留旧 nabu_action=android/bds 的解析兼容性，但不截获启动；旧配置同样按真实 kernel 加载。不要继续使用旧版固件热重启 Android 应用。
+Android 使用普通 EFI 条目，kernel 指向配套 NabuAndroid.efi；Recovery 使用左下角按钮。nabu_action 解析仅支持 linux，不再包含 android/bds/windows 的旧动作解析、截获代码或固件内置默认条目。不要继续使用旧版配置与固件热重启 Android 应用。
 
 配置仍统一为 EFI/visor/boot.conf。配置缺失时沿用上游自动发现，不生成固件内置默认条目。默认配置关闭 selfheal，避免自动写 NVRAM 或替换回退 EFI。用户显式启用的上游功能不裁剪。
 
@@ -56,7 +56,7 @@ boot_inputs / root_patch 的可选 Recovery、Magisk、KSU 处理保持主分支
 
 安装不仅要复制 EFI/visor，还要备份并替换 EFI/BOOT/bootaa64.efi；微软引导文件保持原样。Windows 安装脚本从默认 dist/esp 复制，最后替换回退 EFI。回滚先恢复原回退 EFI 和 boot，再移除 Visor 资源。
 
-一键更新必须显式提供 NoSB --fd，仍在临时上游副本应用 NABU.patch。三个应用分别编译，没有共享的 EfiMain 入口。适配维护在主仓库补丁/桥接中，不改子模块工作区。
+一键更新必须显式提供 NoSB --fd，仍在临时上游副本应用 NABU.patch。菜单与 Android 应用分别编译，没有共享的 EfiMain 入口；Recovery 处理链接在菜单内。适配维护在主仓库补丁/桥接中，不改子模块工作区。
 
 旧 boot_slot_build.py、port/boot-slot 等来源记录保留用于对照，不参与本分支的 build.py；不能据此宣称新镜像有 BootSlotDxe 保护。
 

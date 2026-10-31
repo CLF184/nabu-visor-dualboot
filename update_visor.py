@@ -18,7 +18,7 @@ import zipfile
 sys.dont_write_bytecode = True
 REPO = 'https://github.com/IO-ZetZor/Visor-BootManager.git'
 OUTPUTS = ('nabu-visor-boot.img', 'nabu-visor.fd', 'nabu-visor-esp.zip',
-           'NabuVisorMenu.efi', 'NabuAndroid.efi', 'NabuRecovery.efi', 'RenegadeMarkerLoops.bin',
+           'NabuVisorMenu.efi', 'NabuAndroid.efi', 'RenegadeMarkerLoops.bin',
            'manifest.json', 'SHA256SUMS.txt', 'README.md')
 STATE = '.visor-update'
 SOURCE_RECORD = 'port/visor-upstream.json'

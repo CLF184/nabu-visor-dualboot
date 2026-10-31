@@ -12,7 +12,7 @@ py update_visor.py --fd "E:\path\nabu-NoSB.img"
 
 1. 在独立临时目录下载完整上游源码，记录准确 commit。
 2. 检查并应用 `port/visor/NABU.patch`，重新生成完整 ARM64 功能清单。
-3. 沿用 nabu、Renegade 标记和 PSCI 桥接、Recovery 适配，编译三个独立 EFI 应用、boot 和 ESP 包；输入 FD 原样保留，不编译或注入 DXE。
+3. 沿用 nabu、Renegade 标记和 PSCI 桥接、Recovery 按钮，编译菜单与 Android EFI、boot 和 ESP 包；输入 FD 原样保留，不编译或注入 DXE。
 4. 将被替换的文件备份到 `.visor-update/backup.zip`，然后将 Visor 子模块检出到新 commit，更新功能清单、ESP 资源、来源记录和 `dist/` 中的同名成品。GNU-EFI 与 Renegade 的子模块提交保持固定。
 
 **脚本不刷机、不挂载或修改平板 ESP。** 更新后的镜像需要手动刷入、复制配置包并确认 Android、Windows、Recovery。构建通过不等于真机已经验证；新 manifest 会明确记录未真机验证状态。
@@ -62,7 +62,7 @@ py update_visor.py --fd "E:\path\nabu-NoSB.img" --source "E:\你的文件夹\Vis
 
 初始上游基线为 `71a05b5945e37903cfeeaf69c76220fdf5861ac9`。当前准确版本、补丁哈希和源码校验值以 `port/visor-upstream.json` 为准；新的镜像 manifest 也记录这些信息。
 
-`NABU.patch` 集中维护菜单硬件接口、ABI、Linux 动作及其余上游适配。ESP 分支编译宏禁用 Android/BDS 截获和固件内置默认条目：普通 EFI 条目由上游加载，配置缺失沿用上游自动发现。新增动作优先编写独立 EFI，不为普通应用新增菜单动作键。`port/recovery/overlay.py` 处理第三按钮与错误显示，独立 Recovery 条目使用 `src/recovery_app.zig`。Renegade 写入/接收循环仍来自固定子模块，仅私有运行时服务桥接改为 PSCI 复位。
+`NABU.patch` 集中维护菜单硬件接口、ABI、Linux 动作及其余上游适配，不包含旧 Android/BDS 动作解析或截获。普通 EFI 条目由上游加载，配置缺失沿用上游自动发现。`port/recovery/overlay.py` 处理左下角 Recovery 按钮与错误显示，不生成独立 Recovery EFI。Renegade 写入/接收循环仍来自固定子模块，仅私有运行时服务桥接改为 PSCI 复位。
 
 上游项目：[IO-ZetZor/Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)。不要用未经 nabu 适配的上游二进制覆盖本分支应用；应通过本脚本重新应用平台补丁和编译。仅更新菜单/主题时安装 ESP 文件即可，FD、内核或分流器变化时才需刷入新 boot。
 

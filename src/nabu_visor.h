@@ -5,11 +5,7 @@
 
 /* 条目动作（boot_entry_t.nabu_action / boot.conf 键 nabu_action） */
 #define NABU_ACTION_NONE    0
-#define NABU_ACTION_BDS     1  /* 交回固件原始 BDS：Windows 按原生流程启动 */
 #define NABU_ACTION_LINUX   3  /* 原版 rEFInd 处理选中的 Linux EFI 条目 */
-#define NABU_ACTION_ANDROID 2  /* 写标记 + 热重启：内核分流代码回到 Android */
-
-/* ESP 分支仅处理 linux 动作；旧配置 android/bds 不再截获普通 EFI 加载。 */
 
 EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs, EFI_HANDLE image);
 void nabu_linux_table_end(void);

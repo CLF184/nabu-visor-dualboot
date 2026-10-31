@@ -215,7 +215,7 @@ def main():
               '-I'+str(port/'compat'), '-I'+str(root/'third_party/gnu-efi/inc'),
               '-I'+str(root/'third_party/gnu-efi/inc/aarch64'), '-Os']
     reset_sources = [source_paths['Reboot2PayloadApp.c'], port/'bridge.c']
-    print('[1/4] Compile standalone Visor, Android and Recovery EFI applications', flush=True)
+    print('[1/4] Compile standalone Visor and Android EFI applications', flush=True)
     menu_app = work/'NabuVisorMenu.efi'
     run(zig, 'build-exe', root/'src/menu.zig', '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
         '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(menu_app),
@@ -226,13 +226,6 @@ def main():
         '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(app),
         '-cflags', *common, '--', *reset_sources)
     shutil.copy2(app, esp/'NabuAndroid.efi')
-    recovery_app = work/'NabuRecovery.efi'
-    efi_sources = [root/p for p in vb.sources() if p.startswith('third_party/gnu-efi/')]
-    run(zig, 'build-exe', root/'src/recovery_app.zig', '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
-        '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(recovery_app),
-        '-cflags', *common, '--', root/'src/visor_efi_support.c', *efi_sources,
-        *reset_sources, *recovery_sources)
-    shutil.copy2(recovery_app, esp/'NabuRecovery.efi')
     fallback = esp_tree/'EFI/BOOT/bootaa64.efi'
     fallback.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(menu_app, fallback)
@@ -303,7 +296,6 @@ def main():
     print('[4/4] Package ESP menu, configuration/assets and system EFI applications', flush=True)
     shutil.copy2(menu_app, out/menu_app.name)
     shutil.copy2(app, out/app.name)
-    shutil.copy2(recovery_app, out/recovery_app.name)
     archive = out/(args.output_prefix+'-esp.zip')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         for file in sorted(esp_tree.rglob('*')):
@@ -376,7 +368,7 @@ def main():
             'Newly generated image; requires hardware verification even though the released implementation was tested.',
             'Android uses the same paired Renegade markers previously verified by the user.',
             'Visor is an ESP EFI application loaded by the original BDS; Windows uses the ordinary Visor EFI loader.',
-            'The third button and NabuRecovery.efi write the Recovery BCB, then reuse the paired Renegade marker/PSCI reset bridge.',
+            'The bottom-left Recovery button writes the BCB and reuses the paired Renegade marker/PSCI reset bridge; no separate Recovery application or entry.',
             'Native Recovery boot context from the original FDT bypasses Visor without an additional reboot, including the power/volume-up path. The previous build was confirmed for keys; this generated image still requires verification.',
             'Recovery ramdisk is included from the selected image.' if args.recovery else 'No Recovery ramdisk was supplied; the installed Recovery is used.',
             'Entire input FD is preserved: no menu/BDS hook, no injected BootSlotDxe and no reset-driver replacement.',
@@ -397,7 +389,7 @@ def main():
     }
     manifest['boot_slot_protocol'] = {'injected': False, 'behavior': 'unchanged input firmware only; no additional slot maintenance'}
     manifest['menu_application'] = {'path': r'\EFI\BOOT\bootaa64.efi', 'sha256': sha(menu_app.read_bytes()),
-                                    'recovery_path': r'\EFI\visor\NabuRecovery.efi',
+                                    'recovery': 'bottom-left power action; no separate EFI application',
                                     'windows': 'ordinary LoadImage/StartImage of the configured bootmgfw.efi'}
     refind_binary = esp/'refind/bootaa64.efi'
     if refind_binary.is_file():
@@ -406,7 +398,7 @@ def main():
     if visor_record.exists():
         manifest['visor_upstream'] = json.loads(visor_record.read_text(encoding='utf-8'))
     (out/'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
-    checksum_files = [image_path, fd_path, archive, menu_app, app, recovery_app,
+    checksum_files = [image_path, fd_path, archive, menu_app, app,
                       out/'RenegadeMarkerLoops.bin', out/'manifest.json']
     (out/'SHA256SUMS.txt').write_text(''.join(sha(p.read_bytes())+'  '+p.name+'\n' for p in checksum_files), encoding='ascii')
     if old_release_sha is not None and baseline.resolve() != image_path.resolve() and sha(baseline.read_bytes()) != old_release_sha:
