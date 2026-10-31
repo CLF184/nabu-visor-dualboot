@@ -1,5 +1,5 @@
 """固定版本的上游 Visor 功能清单、编译参数与清单生成工具。
-当前 build.py 将完整 ARM64 菜单编译为 FD 内的 DXE 驱动。
+当前分支将完整 ARM64 菜单编译为 ESP 上的独立 EFI 应用。
 上游：IO-ZetZor/Visor-BootManager commit 71a05b5945e37903cfeeaf69c76220fdf5861ac9。
 """
 from pathlib import Path
@@ -63,7 +63,7 @@ def prepare():
     header += [f'#define VISOR_HAS_{f.upper()} {int(f in on)}' for f in registry()['FEAT_ALL'].split()]
     (ROOT / 'build/visor_features.h').write_text('\n'.join(header + ['#endif', '']))
     manifest = {'v': 1, 'ver': visor_version(), 'arch': 'aarch64', 'profile': 'full',
-                'feat': on, 'nabu_adapter': 'fd-dxe-bds'}
+                'feat': on, 'nabu_adapter': 'esp-application'}
     payload = 'VISORFT1' + json.dumps(manifest, separators=(',', ':')) + 'VISORFTEND'
     (ROOT / 'build/visor_manifest.c').write_text(
         'const char visor_build_manifest[] = ' + json.dumps(payload) + ';\n')
@@ -73,7 +73,7 @@ def flags(host=False):
     return (['-mstrict-align'] if not host else []) + [
         '-mno-ms-bitfields', '-std=c11', '-fshort-wchar', '-ffreestanding', '-fno-stack-protector',
         '-fno-strict-aliasing', '-mno-stack-arg-probe',
-        '-DNABU_EMBEDDED=1', '-Isrc', '-Isrc/compat', '-Ithird_party/visor/src/include',
+        '-DNABU_EMBEDDED=1', '-DNABU_ESP_APPLICATION=1', '-Isrc', '-Isrc/compat', '-Ithird_party/visor/src/include',
         '-Ithird_party/gnu-efi/inc', '-Ithird_party/gnu-efi/inc/aarch64', '-Ibuild',
         '-include', 'build/visor_features.h', f'-DVISOR_VERSION=L"{visor_version()}"',
         '-Os', '-Wno-incompatible-pointer-types']

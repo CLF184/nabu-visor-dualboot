@@ -1,273 +1,176 @@
-# nabu Visor 启动菜单
+# nabu Visor 多系统启动菜单
 
-小米平板 5（nabu）的 Visor 图形启动菜单。横屏显示，音量键选择，电源键确认。进入后 5 秒无操作自动启动 Android；有操作则取消本次倒计时，等待确认。
+**推荐使用当前默认分支 `esp-application`。** 本分支参考 [Issue #1 的修复方案](https://github.com/CLF184/nabu-visor-dualboot/issues/1#issuecomment-6538193058)：FD 保持原样，由原固件从 ESP 加载 Visor。Android、Windows、Recovery 使用独立 EFI 启动项，Linux 保留 rEFInd 接入。
 
-沿用 Visor 的外部配置、主题资源和完整 ARM64 功能清单。菜单嵌入 UEFI FD，配置与素材放在平板 ESP 的 `\EFI\visor\`。Android 使用 Renegade 标记配对启动，Windows 继续原固件 BDS 流程，Recovery 启动平板已有的 Recovery。
+**需要允许未签名 EFI 应用的 nabu NoSB 固件，Windows 的 Secure Boot 保护也会关闭。** 工具不会自动关闭 Secure Boot、修改证书或把普通固件转换为 NoSB。
 
-支持在同一菜单中选择 Android、Windows 和 Linux，也可通过菜单按钮或电源＋音量上进入 Recovery。
+需要 Windows Secure Boot 时，请使用 [secure-boot 分支](https://github.com/CLF184/nabu-visor-dualboot/tree/secure-boot)。该分支向 FD 加入菜单驱动、挂接原 BDS，依赖固件实现；其他来源 FD 可能黑屏、卡启动画面或交接崩溃。构建成功不能证明固件兼容，须保留原 boot 和 ESP 备份，准备 Fastboot 回滚。
 
-## 获取源码与准备依赖
+## 启动方式
 
-在 Windows PowerShell 中执行：
+```text
+ABL → 多系统 boot 的入口分流器
+      ├ Android 标记 / 原厂 Recovery / 关机充电 → 原 Android 内核
+      └ 原样 NoSB UEFI → 原 BDS → EFI/BOOT/bootaa64.efi（Visor）
+                                 ├ Android → NabuAndroid.efi → 标记＋PSCI 重启
+                                 ├ Windows → 微软 bootmgfw.efi
+                                 ├ Recovery → NabuRecovery.efi → BCB＋标记＋PSCI 重启
+                                 └ Linux → 原版 rEFInd → 所选 EFI/内核
+```
 
-```powershell
-git clone https://github.com/CLF184/nabu-visor-dualboot.git
+- 音量上/下选择，电源键松开确认；首次进入后 5 秒无输入自动选择 Android，有输入就取消本次倒计时。
+- 保留 Visor 完整 ARM64 功能清单、横屏、外部主题、视频背景、文件浏览和普通 EFI 加载。
+- 菜单位于 ESP，更新菜单程序、主题和配置无需刷入 boot。
+- FD 不注入菜单、重启驱动或 BootSlotDxe，不挂接 BDS。已有模块原样保留；没有额外的 A/B 成功标记和重试次数维护，相关行为由输入固件与系统负责。
+- PSCI 重启是否保留内存标记取决于底层固件；原生 Recovery 和关机充电仍按 nabu FDT 启动参数识别。
+- 仅适用于 nabu/SM8150 的 3 MiB FD、固定加载地址和启动协议，不能直接用于其他设备。
+
+## 准备与构建
+
+Windows PowerShell / CMD：
+
+```cmd
+git clone --branch esp-application https://github.com/CLF184/nabu-visor-dualboot.git
 cd nabu-visor-dualboot
 git submodule update --init --depth 1
 py -m pip install --target tools/python ziglang==0.14.1
+py build.py --boot "E:\path\boot.img" --fd "E:\path\nabu-NoSB.img" --out-dir ".\dist"
 ```
 
-需要 Python 3、Git 和 Zig **0.14.1**。只初始化三个直接参与编译的子模块，无需 `--recursive`：
+需要 Python 3、Git、Zig 0.14.1，以及未加本菜单补丁的 Android boot 和匹配设备的 NoSB UEFI。三个子模块为 Visor、GNU-EFI、Renegade；Windows 补丁工具已随仓库提供，见 [来源与许可](tools/official/README.md)。
 
-| 子模块 | 用途 |
+`--fd` 必须显式指定，支持原始 .fd 或 UEFI Android boot .img。也可用 [ArKT 的 FD 提取网页](https://arkt-7.github.io/nabu-uefi-autopatcher/) 提取。构建校验外层 FFS2/FFS3 固件卷和唯一 3 MiB FD，提取后原样附加，不重建内部固件卷；这不等于验证了硬件兼容性或 NoSB 状态。
+
+输出目录可以已存在；同名文件在检查通过后覆盖，其他文件保留。旧输出保存在 .build-backup/backup.zip。产物仅发布到输出目录，不回写工程 esp 模板，也不操作平板。
+
+### 可选 Recovery 与 root
+
+不指定对应文件时，保留输入 boot 的原有内容，不执行该项修补：
+
+| 参数 | 行为 |
 | --- | --- |
-| `third_party/visor` | Visor 菜单、配置解析与主题资源 |
-| `third_party/gnu-efi` | EFI C 库和头文件 |
-| `third_party/renegade` | Reboot2PayloadApp、BootShim 标记循环与 BootSlotDxe |
+| --recovery | 整体替换 Recovery ramdisk，保留 Android 内核 |
+| --magisk-apk / --ksu-apk | root APK 二选一，也可全部省略 |
+| --ksu-kmi | 可选 KSU KMI，仍须匹配输入内核 |
 
-仓库已包含构建使用的 Windows x64 版 `magiskboot.exe` 和 `DualBootKernelPatcher-x86_64.exe`，以及可选 APK 修补所需的 `busybox.exe`、`ksud.exe`，位于 `tools/official/`，拉取后无需另行下载补丁工具。原有两个工具保持现用版本；来源、许可证和 SHA-256 见 [补丁工具说明](tools/official/README.md)。
-
-另外准备**未加本菜单补丁的 Android boot.img** 和**原始 nabu UEFI `.fd` 或 `.img`**。
-
-如果手里只有 nabu UEFI `.img`，可使用 [ArKT 的 UEFI FD 提取网页](https://arkt-7.github.io/nabu-uefi-autopatcher/) 上传该镜像，在 `EXTRACTED COMPONENTS` 中下载 `extracted.fd`。将它作为构建命令的 `--fd` 输入，或改名为 `nabu-uefi.fd` 放到 `tools/official/`。请从未加入本菜单补丁的原始 UEFI 镜像提取，Android `boot.img` 仍需另行准备。
-
-默认路径如下，也可在命令中指定：
-
-| 项目 | 默认路径 |
-| --- | --- |
-| 原始 Android boot | `tools/official/stock-boot.img` |
-| 原始 nabu UEFI FD | `tools/official/nabu-uefi.fd` |
-| 输出目录 | `dist/` |
-
-GitHub 保存源码、补丁、配置、上述两个补丁工具及子模块指针；原始固件、Python/Zig 安装目录和编译产物仅保留在本机。
-
-## 编译
-
-在项目目录运行，使用默认输入：
-
-```powershell
-py build.py
+```cmd
+py build.py --boot "E:\path\boot.img" --fd "E:\path\nabu-NoSB.img" --recovery "E:\path\twrp.img" --magisk-apk "E:\path\Magisk.apk"
 ```
 
-指定自己的输入文件与输出目录：
-
-```powershell
-py build.py --boot "E:\path\original-android-boot.img" --fd "E:\path\new-nabu.fd" --out-dir ".\dist"
-```
-
-- `--boot`：原始 Android boot 镜像路径。
-- `--fd`：nabu UEFI `.fd` 或 `.img` 路径；`.img` 会自动解包并提取、校验 FD。
-- `--recovery`：可选 Recovery 镜像；省略时沿用原 boot 的 ramdisk，指定时合入 Recovery ramdisk、保留 Android 内核。
-- `--magisk-apk` / `--ksu-apk`：可选 root APK，可全部省略；需要修补时最多指定一个。
-- `--ksu-kmi`：可选 KSU KMI，如 `android14-6.1`；默认从输入内核识别，手动指定仍须与内核版本一致。
-- `--out-dir`：输出目录；省略则使用 `dist/`。
-
-**输出目录可以已存在。同名生成文件在全部校验通过后覆盖，其他文件保留。** 构建先在独立临时目录完成；发布失败尝试回滚。替换前的文件保存在输出目录 `.build-backup/backup.zip`，只保留最近一次。压缩包内 `publication.json` 记录各备份文件对应的原路径。
-
-查看所有参数：`py build.py --help`。
-
-### 合入 Recovery 和 root
-
-**Recovery 和 root APK 都不是必选项，也没有默认替换文件。** 都不指定时，沿用原 boot 的 ramdisk，包括其中已有的 Recovery/root 内容，仅执行原有 Visor/FD 补丁流程：
-
-```powershell
-py build.py --boot "E:\path\boot.img" --fd "E:\path\uefi.img"
-```
-
-也可只指定 root APK（在原 ramdisk 上修补），或只指定 Recovery（换成其 ramdisk，不额外执行 root 修补）。Recovery ramdisk 是整体替换：只选择 Recovery 时，最终 root 内容取决于该 Recovery ramdisk，不会自动从被替换的原 ramdisk 迁移 root。
-
-例如，选择 UEFI 镜像、Recovery 和 Magisk APK：
-
-```powershell
-py build.py --boot "E:\path\boot.img" --fd "E:\path\uefi.img" --recovery "E:\path\twrp.img" --magisk-apk "E:\path\Magisk.apk"
-```
-
-改用 KSU 时，将最后一项换成 `--ksu-apk "E:\path\KernelSU.apk"`。不需要合入 Recovery 或 root 时，省略对应参数即可。
-
-处理顺序为 **Recovery ramdisk → root 修补 → Visor/FD 补丁**。全部在 Windows 离线完成，不需要 ADB，不安装 APK、不刷写设备。输入文件不修改；任何步骤失败就中止，不发布或覆盖已有成品。
-
-- UEFI `.img` 支持 Android boot 封装，以及 BootShim 后附 FD 的布局。按固件卷结构寻找唯一、有效的 3 MiB nabu FD，继续使用现有模块校验；不接受其他设备的任意 UEFI 镜像。
-- Recovery 合入只替换 boot 的 ramdisk，保留所选 Android 内核和其余打包内容，不写 recovery/vendor_boot 等分区。需要适配 nabu、兼容该 Android 内核的 recovery-as-boot 镜像；工具不能保证任意 Recovery/内核组合能启动。
-- Magisk 从所选 APK 提取 ARM64 资源，原样执行其中的 `boot_patch.sh`。Windows BusyBox 只提供主机脚本环境和输出适配；保留 verity、加密配置，不自动修改 vbmeta 分区。nabu 的 pre-init 分区默认使用 `metadata`；已有 Magisk 配置仍由 APK 原脚本读取和继承。已安装 Magisk 的输入由 APK 原脚本执行恢复及重修补。
-- KSU 从所选 APK 的 ARM64 `ksud` 中提取嵌入的 `ksuinit` 与匹配 LKM，调用原版 Windows `ksud boot-patch`。不使用 Windows 工具自带的模块替代 APK 模块。官方 KernelSU v3.3.1 资源已核对；其他版本/分支会尝试识别，资源格式不支持、映射不唯一或内核不兼容时直接报错。
-- **nabu 常用的 4.14 内核不满足官方 KSU LKM 的兼容要求。** APK 不能替代内核适配；失败时不会换内核、退回其他 root 方式或生成伪成功成品。
-
-`manifest.json` 的 `input_preparation` 记录 Recovery/APK 哈希、root 补丁器、KSU KMI 和处理后 boot 的哈希。最终再次解包，确认打包的内核和处理后的 ramdisk 一致。合入 Recovery/root 后，原始 ramdisk 未修改的旧校验标志会相应设为 false。
+处理顺序为 Recovery ramdisk → root → 分流器与原样 FD，全程 Windows 离线。只选择 Recovery 不迁移旧 ramdisk 的 root；Recovery 必须与保留的 Android 内核、设备树和固件兼容，不能保证任意组合的触屏等硬件可用。Magisk 执行 APK 原脚本；KSU 使用 APK 自带模块/init 和原版 Windows ksud，不兼容时报错。常见 nabu 4.14 不满足官方 KSU LKM 条件。详见 [实现说明](docs/IMPLEMENTATION.md)。
 
 ### 成品
 
 | 文件 | 用途 |
 | --- | --- |
-| `nabu-visor-boot.img` | 可刷入的双启动 boot 镜像 |
-| `nabu-visor-esp.zip` | 配置、图标、背景和配套 Android EFI 程序 |
-| `nabu-visor.fd` | 已加入菜单的固件 FD |
-| `NabuBootMenu.efi` / `NabuAndroid.efi` | 菜单驱动与独立 Android EFI 程序 |
-| `BootSlotDxe.efi` | 原版 Renegade A/B 槽位维护驱动，已包含在 FD 中 |
-| `RenegadeMarkerLoops.bin` | 配对标记循环与原厂 Recovery 入口代码 |
-| `manifest.json` / `SHA256SUMS.txt` | 构建来源与文件校验值 |
+| nabu-visor-boot.img | Android 内核、入口分流器和原样 FD |
+| nabu-visor.fd | 与提取到的输入 FD 完全相同 |
+| NabuVisorMenu.efi | 独立菜单，安装为 EFI/BOOT/bootaa64.efi |
+| NabuAndroid.efi / NabuRecovery.efi | 独立 Android / Recovery 应用 |
+| nabu-visor-esp.zip、esp/ | 完整 ESP 包及展开目录 |
+| RenegadeMarkerLoops.bin | 标记接收、原厂 Recovery / 关机充电识别 |
+| manifest.json / SHA256SUMS.txt | 来源、交接方式、检查结果和哈希 |
+
+三个程序均为 EFI application，每个 Zig 入口文件只导出一个 EfiMain。不生成菜单 DXE 或 BootSlotDxe。
 
 ## 安装与回滚
 
-先备份平板现有 boot 镜像和 ESP 的 `\EFI\visor\` 配置。解压 `nabu-visor-esp.zip`，把其中的 `EFI/visor/` 复制到**平板 EFI 分区**的 `\EFI\visor\`，然后刷入 boot 分区：
+先备份现有 boot、ESP 的 EFI/BOOT/bootaa64.efi 和个人 EFI/visor 配置，确认 EFI/Microsoft/Boot/bootmgfw.efi 是微软引导程序。
 
-```powershell
-fastboot devices
-fastboot flash boot .\dist\nabu-visor-boot.img
+1. 解压 ESP 包，将 **EFI/visor 及 EFI/BOOT/bootaa64.efi 都复制到平板 ESP**。仅复制旧版配置目录不会安装新菜单。
+2. 保留微软和 Linux EFI，Windows 不能指回菜单本身。不要通过覆盖微软 bootmgfw.efi 安装菜单。
+3. 核对当前槽位后刷入 boot。以下以 A 槽为例：
+
+从旧版固件内菜单切换时，需要同时安装新 ESP 包并刷入含原样 NoSB FD 的新 boot；仅替换 EFI 不会移除旧 FD 内的菜单驱动。
+
+```cmd
+fastboot getvar current-slot
+fastboot flash boot_a .\dist\nabu-visor-boot.img
 fastboot reboot
 ```
 
-更新旧版时，在实际使用的 `boot.conf` 中保留 Android 的 `nabu_action=android`、Windows 的 `nabu_action=bds`，并更新配套的 `NabuAndroid.efi`。自己的标题、背景设置可合并保留。
+固件须把 EFI/BOOT/bootaa64.efi 设为启动目标；若优先加载其他 EFI，需在固件中选择此路径。
 
-在平板 Windows 上，可用管理员权限运行 `install/install-windows.cmd`，把工程 `esp/` 内的配置和素材复制到运行设备自己的 ESP。它会覆盖同名文件，先备份个人配置；在电脑上构建时不运行此脚本。
+也可在**平板 Windows 上**以管理员权限运行 install/install-windows.cmd，从默认 dist/esp 安装。脚本保留原回退 EFI 为 EFI/BOOT/bootaa64.efi.before-visor，再复制菜单。不要在构建电脑上运行。
 
-回滚时刷回此前备份的 boot 镜像。`install/restore-windows.cmd` 只移除 ESP 的菜单配置；单独删除配置不能移除 boot 内的菜单。
+回滚须刷回原 boot，并恢复原 EFI/BOOT/bootaa64.efi。卸载脚本先恢复该备份，再移除 Visor 资源；缺少备份时停止，需手动恢复。仅刷回 boot 不会恢复 ESP 文件。
 
-## 操作与启动方式
+## 配置与主题
 
-- 音量上/下切换系统条目和左下角电源动作，电源键松开时确认。
-- 默认 Android，首次 5 秒无输入自动启动；输入后本次不再倒计时。
-- bootloader 指定关机充电模式时，直接继续原 Android 充电路径，不进入菜单或倒计时；基础 boot 的内核与 ramdisk 需支持关机充电。
-- 左下角依次为关机、重启、Recovery。Recovery 沿用 Visor 原版固件设置图标。
-- 电源＋音量上触发原厂 Recovery 环境时，入口直接继续原内核；bootloader 为 `fastboot reboot recovery` / `adb reboot recovery` 提供相同环境时也走此入口。
-- 保留上游文件浏览、编辑器和键盘功能。浏览器或快照覆盖 EFI/内核路径时，优先启动本次选中的文件。普通 EFI 加载失败沿用上游错误恢复界面，文字操作需要 USB 键盘。
-- Esc 打开的 Visor 恢复控制台与 Android Recovery 是两个不同入口。
-
-| 选择 | 实际操作 |
-| --- | --- |
-| Android | 写入 128 个 `0x5241` 标记后热重启；内核入口清除标记并继续原内核 |
-| Windows | 退出菜单，交回 FD 原始 BDS 启动流程 |
-| Linux | 原版 rEFInd 加载该条目的 EFI/内核、initrd 和参数 |
-| Recovery | 向 `misc` 写入并核对 `boot-recovery` 请求，再使用同一套标记与热重启流程 |
-
-Recovery 按钮使用已有 Recovery 镜像。原厂 Recovery 入口识别针对当前 nabu 的 FDT 启动参数约定；完整适配和限制见 [实现说明](docs/IMPLEMENTATION.md)。
-
-FD 同时包含原版 Renegade `BootSlotDxe`。每次进入 UEFI 时，它刷新当前 A/B 槽位的重试次数并标记启动成功，避免进入菜单或其他系统时因未被 Android 标记成功而耗尽启动重试次数。按上游逻辑也会清除两个槽位的不可启动标志，并补满尚未成功槽位的重试次数。若输入 FD 已含此驱动，保留原模块，不重复插入；不支持 A/B 的分区布局会跳过处理。
-
-## 修改配置、背景和标题
-
-运行时统一读取平板 ESP 的 **`\EFI\visor\boot.conf`**。修改后下次进入菜单生效，无需重刷 boot。
-
-把 `my-background.png` 放到 `\EFI\visor\backgrounds\`，再修改配置：
+仍读取平板 ESP 的 **\EFI\visor\boot.conf**。Android、Windows、Recovery 使用真实 EFI 路径，不再配置 nabu_action=android / bds：
 
 ```ini
-title=Nabu Boot Menu
-background=\EFI\visor\backgrounds\my-background.png
+file_log=0
 timeout=5
 default=0
+remember_last=0
+autoboot=0
+selfheal=0
+title=none
+background=\EFI\visor\backgrounds\default.png
+
+entry {
+    name=Android
+    kernel=\EFI\visor\NabuAndroid.efi
+}
+entry {
+    name=Windows
+    kernel=\EFI\Microsoft\Boot\bootmgfw.efi
+}
+entry {
+    name=Recovery
+    kernel=\EFI\visor\NabuRecovery.efi
+}
 ```
 
-`title=none` 隐藏标题；`default` 按条目顺序从 0 开始，目前 0 为 Android。完整配置格式见 `boot.conf.example`。
+旧配置的 android/bds 值不再截获启动，使用真实 kernel 路径；**必须更新配套 Android EFI，不能继续用旧版热重启程序**。标题、背景、图标及字体沿用 Visor 格式，完整语法见 boot.conf.example。
 
-实机参考配置：[config/examples/nabu-tripleboot.conf](config/examples/nabu-tripleboot.conf)。内容直接取自平板 ESP 的 `EFI/visor/boot.conf`，保留 Android、Windows、Ubuntu 三个条目及已注释的 Arch 条目，使用 5 秒默认 Android、隐藏标题和 EFI 路径显示、自定义静态背景。它仅作参考，不替换默认配置，也不会被自动读取或打包；使用时按需调整，再保存为 ESP 的 `EFI/visor/boot.conf`。其中 `bg_custom.png` 背景与 `6.14.11-camera.efi` 是这台设备的外部文件，需要自行准备或改成自己的路径。
-
-电脑上的配置源为 `config/boot.conf`，配置包使用 `esp/EFI/visor/boot.conf`。要把配置源的修改打包，先同步：
+配置包使用工程 esp/EFI/visor/boot.conf；修改 config/boot.conf 后可先同步再构建：
 
 ```powershell
 Copy-Item .\config\boot.conf .\esp\EFI\visor\boot.conf
-py build.py
 ```
 
-保留 Android 和 Windows 的 `nabu_action`。当前 Windows 条目的 `kernel=...bootmgfw.efi` 用于展示/识别，实际启动交回 BDS。
+[三系统参考配置](config/examples/nabu-tripleboot.conf) 保留 Ubuntu 和注释的 Arch 路径，并按本分支改用独立 EFI。自定义背景和 Linux 文件须自行准备。
 
-## 更新 Visor、UEFI 与添加系统
+## Linux：保留 rEFInd
 
-双击 `update_visor.cmd`，或执行 `py update_visor.py`。脚本获取最新 Visor、应用 nabu 补丁、重新构建并备份替换前文件，保留工程中的个人配置与素材。GNU-EFI 和 Renegade 保持固定版本。
+按 [TheMojoMan/xiaomi-nabu](https://github.com/TheMojoMan/xiaomi-nabu) 准备适配的 Linux、EFI 和 efi.tar，然后执行：
 
-只检查兼容性：`py update_visor.py --check-only`。脚本不刷机，补丁冲突或编译失败时停止；参数和恢复方式见 [上游更新说明](docs/UPSTREAM_UPDATE.md)。
-
-Windows 更新只替换 ESP 引导文件时，无需重新构建。要更新 boot 中的 UEFI，取得原始 nabu `.fd` 后，用 `--fd` 重新构建并刷入生成的 boot。UEFI `.img` 或更新包需先提取 FD；新输入须符合 nabu/SM8150 工具链布局。
-
-菜单可以添加其他系统。普通条目不设置 `nabu_action`，沿用 Visor 的 EFI 加载流程，可配置 ARM64 EFI 引导程序或 EFI Stub 内核；Linux 需使用适配 nabu 的内核、设备树/ACPI 和启动参数。
-
-三系统配置保留 Android 的 `nabu_action=android`、Windows 的 `nabu_action=bds`，并为每个 Linux 条目设置 `nabu_action=linux`。Windows 的 BDS 动作跟随固件默认启动项，因此安装 Linux 时应保留 Windows 为该默认目标；Linux 则通过下述独立 rEFInd 目录加载。
-
-## Linux：复用 Nabu rEFInd
-
-Linux 条目设置 `nabu_action=linux`，走 `Visor → 原版 Nabu rEFInd → 所选 Linux 引导文件`。可以配置多个发行版，或把目标设为 ARM64 GRUB/shim；发行版内核仍需适配 nabu。
-
-先按 [TheMojoMan/xiaomi-nabu](https://github.com/TheMojoMan/xiaomi-nabu) 准备 Linux 根分区和 EFI 文件，再准备项目配套 `efi.tar`。在本项目目录运行：
-
-```powershell
+```cmd
 py prepare_linux.py --efi-tar "E:\Download\efi.tar" --boot-conf "E:\backup\boot.conf" --kernel "\EFI\ubuntu\6.14.11.efi"
 ```
 
-`--boot-conf` 指定平板实际配置的备份，保留个人背景及其他条目；省略时使用 `esp/EFI/visor/boot.conf`。`--entry-name` 默认 Ubuntu，指定其他名称可添加或更新其他 Linux 条目。输出在 `dist/linux-esp/`，也可用 `--out-dir` 指定；同名生成文件备份后覆盖。
-
-将输出的 `EFI/visor/refind/` 和 `EFI/visor/boot.conf` 复制到平板 ESP，并安装支持 `linux` 动作的新 boot 镜像。此动作需要更新一次 boot；之后修改发行版路径和参数无需重新编译或刷入。rEFInd 放在独立目录，保留原版程序、驱动、主题和 `refind.conf`，不覆盖 `EFI/BOOT`。
+复制生成的 EFI/visor/refind 和合并后的 boot.conf 到平板 ESP。Linux 条目继续使用 nabu_action=linux：
 
 ```ini
 entry {
     name=Ubuntu
-    icon=\EFI\visor\icons\ubuntu.png
     kernel=\EFI\ubuntu\6.14.11.efi
     nabu_action=linux
 }
-
-entry {
-    name=Other Linux
-    icon=\EFI\visor\icons\linux.png
-    kernel=\EFI\linux\vmlinuz.efi
-    initrd=\EFI\linux\initrd.img
-    cmdline=root=PARTLABEL=linux rw
-    nabu_action=linux
-}
 ```
 
-有内置参数/ramdisk 的 UKI 通常不用额外设置 `cmdline`/`initrd`。其他分区可指定 Visor 原有的 `uuid`（GPT 分区 GUID）。每次选择后，适配层生成并回读核对 `EFI/visor/refind/nabu-selected.conf`，合并原 refind.conf 内容以保留一级主题 include，使用 rEFInd 原生 `volume/loader/initrd/options` 和立即自动启动；因此该目录需可写。更换发行版只改 `boot.conf` 中对应条目的路径和参数，不手改生成文件。
+其他发行版填写对应 ARM64 EFI / EFI Stub / UKI / GRUB 路径，按需配置 initrd、cmdline 和 uuid。每次选择生成并核对 rEFInd 临时配置，该目录须可写。rEFInd 使用独立子目录，不覆盖主菜单 EFI/BOOT。
 
-这一动作适用于 rEFInd 可加载的普通 ARM64 EFI/EFI Stub/UKI 文件。Visor 的加密镜像容器、LUKS 辅助注入和 `sha256` 固定值无法直接转交给未修改的 rEFInd；带这些设置的 `linux` 动作会报错，不会忽略约束。需要这些 Visor 功能时保留普通条目（不设置动作），原有加载功能仍完整保留。文件浏览器或快照临时覆盖目标时也继续沿用原 Visor 加载器。
+本分支由原 BDS 正常加载，不重复发送 EndOfDxe，不将未知固件厂商改为 Project Silicium。Visor 的加密容器、LUKS 辅助注入、sha256 固定约束不能直接交给原版 rEFInd，这类 linux 动作会报错；需要这些上游功能时使用普通条目，不设置 nabu_action。
 
-Linux 交接补齐两个原 BDS 通常提供的条件：发送 EndOfDxe 通知；仅在实际 EFI 系统表缺少厂商字段时填入当前基础 FD 的原值并重算校验。这样保留 rEFInd 原版加载器、所有驱动和主题。若 rEFInd 返回，恢复所补字段。厂商值对应当前基础 FD 的 `Project Silicium`；更换其他来源的 FD 时须核对，详见 [实现说明](docs/IMPLEMENTATION.md)。
+## 更新与日志
 
-Android、Windows、Recovery 的动作保持原样，Windows 继续原固件 BDS/Secure Boot 流程。Linux 接入不修改 Secure Boot 开关、证书或固件认证模块；若固件拒绝某 EFI，仍会报错，rEFInd 本身不是签名绕过工具。
-
-要把 rEFInd 资源包含在完整镜像配置包中，可生成到 `--out-dir .\esp` 后执行 `py build.py`。rEFInd 从输入的 `efi.tar` 复用，不参与菜单编译，不新增编译子模块。
-
-## 日志
-
-默认构建关闭三类文件日志：
-
-- Visor 文件日志：配置模板为 `file_log=0`，镜像也关闭文件记录，旧 ESP 配置不能重新开启。
-- Linux 交接日志：不再写入 `EFI/visor/refind/nabu-handoff.log`。
-- rEFInd 日志：每次选择 Linux 生成的主配置设置 `log_level 0`，覆盖基础 `refind.conf` 的日志级别。
-
-关闭日志保留 Linux 启动修复和原有启动错误提示。旧日志不会自动删除；生成镜像不会修改平板上的配置或文件。
-
-## 目录
-
-```text
-nabu-visor-dualboot/
-├─ prepare_linux.py         rEFInd Linux 配置与 ESP 包生成
-├─ build.py                 构建入口
-├─ image_builder.py         镜像与 ESP 包生成
-├─ boot_slot_build.py       编译原版 BootSlotDxe 与 BootSlotLib
-├─ build_publish.py         成品发布、备份与失败回滚
-├─ fd_patch.py              固件卷修改与校验
-├─ patch_boot.py            内核/FD 补丁验证
-├─ visor_build.py           上游功能清单与编译参数
-├─ update_visor.cmd/.py     上游更新入口与脚本
-├─ config/                  默认配置源
-├─ docs/                    实现与更新说明
-├─ esp/EFI/visor/            打包用外部配置与资源
-├─ install/                 平板 Windows 的 ESP 安装/移除脚本
-├─ src/                     nabu 平台适配层
-├─ port/visor/              Visor 补丁
-├─ port/renegade/            标记程序的 ABI 桥接与兼容头文件
-├─ port/boot-slot/           独立 BootSlotDxe 的 ABI 桥接、来源与许可
-├─ port/recovery/            Recovery 请求、入口识别与构建覆盖器
-├─ port/refind/              外部 rEFInd 资源的许可说明
-├─ third_party/             三个编译依赖子模块
-├─ tests/                   发布回滚、横屏绘制及 Linux 交接主机测试
-├─ tools/                   本地编译器、补丁工具和原始输入
-├─ build/                   自动生成的功能头文件与清单
-└─ dist/                    最新成品、校验值与最近一次备份
+```cmd
+py update_visor.py --fd "E:\path\nabu-NoSB.img"
 ```
+
+追加 --check-only 只检查，或 --boot 更换基础 boot。更新脚本检查并重用移植补丁，失败不发布；GNU-EFI、Renegade 保持固定版本。详见 [更新说明](docs/UPSTREAM_UPDATE.md)。
+
+只更新菜单程序或主题时复制 ESP 文件；Android 内核、Recovery/root、FD 或分流器改变时重新生成并刷入 boot。默认关闭 Visor、Linux 交接、rEFInd 文件日志，保留启动错误提示；旧日志不会自动删除。
 
 ## 来源与许可
 
-- [Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)，BSD-2-Clause；当前版本与补丁哈希见 `port/visor-upstream.json`。
-- [Renegade edk2-msm](https://github.com/edk2-porting/edk2-msm)，标记程序及 BootShim 循环来自固定版本子模块。
-- [rEFInd-nabu](https://github.com/rodriguezst/rEFInd-nabu)，Linux 中间加载器；外部文件从用户提供的 `efi.tar` 提取，不加入编译子模块。
-- [AOSP bootloader_message](https://android.googlesource.com/platform/bootable/recovery/+/refs/heads/main/bootloader_message/bootloader_message.cpp)，Recovery 请求格式。
+- [Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)：完整 ARM64 菜单、配置和主题，版本见 port/visor-upstream.json。
+- [Renegade edk2-msm](https://github.com/edk2-porting/edk2-msm)：原版标记写入与扫描/清除循环，私有桥接实现 PSCI 复位。
+- [rEFInd-nabu](https://github.com/rodriguezst/rEFInd-nabu)：从用户 efi.tar 复用，不参与编译。
+- [AOSP bootloader_message](https://android.googlesource.com/platform/bootable/recovery/+/refs/heads/main/bootloader_message/bootloader_message.cpp)：Recovery 请求格式。
+- [Issue #1 / fingerboy2019](https://github.com/CLF184/nabu-visor-dualboot/issues/1)：原样 FD、ESP 应用和 PSCI 交接方案。
 
-本项目适配和构建脚本采用 MIT 许可；上游代码及资源遵循各自许可，详见 [NOTICE.md](NOTICE.md)。
+本项目适配和脚本采用 MIT，上游保留各自许可，见 [NOTICE.md](NOTICE.md)。输入固件、APK 和构建产物不上传源码仓库。

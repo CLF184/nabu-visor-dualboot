@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import uuid
 
 
 def digest(data):
@@ -47,7 +48,34 @@ def unpack(tool, image, directory):
     return directory
 
 
-def load_uefi(path, tool, work, firmware):
+def validate_passthrough_fd(fd):
+    """Validate the outer FV only: no driver discovery, decompression or rewrite."""
+    if len(fd) != 0x300000 or fd[40:44] != b'_FVH':
+        raise ValueError('Expected a 3 MiB nabu FD with an outer firmware volume')
+    filesystems = ('8c8ce578-8a3d-4f1c-9935-896185c32dd3',
+                   '5473c07a-3dcb-4dca-bd6f-1e9689e7349a')
+    if fd[16:32] not in [uuid.UUID(value).bytes_le for value in filesystems]:
+        raise ValueError('Expected an FFS2 or FFS3 firmware volume')
+    length = struct.unpack_from('<Q', fd, 32)[0]
+    header = struct.unpack_from('<H', fd, 48)[0]
+    if not 64 <= header <= length <= len(fd) or header % 2 or fd[55] != 2:
+        raise ValueError('Invalid outer firmware-volume header')
+    if sum(struct.unpack('<'+'H'*(header//2), fd[:header])) & 0xffff:
+        raise ValueError('Invalid firmware-volume header checksum')
+    blocks = 0
+    for offset in range(56, header - 7, 8):
+        count, size = struct.unpack_from('<II', fd, offset)
+        if count == size == 0:
+            if blocks == length:
+                return
+            break
+        if not count or not size:
+            break
+        blocks += count * size
+    raise ValueError('Invalid firmware-volume block map')
+
+
+def load_uefi(path, tool, work, firmware, passthrough=False):
     source = path.read_bytes()
     container = 'fd'
     data = source
@@ -67,9 +95,12 @@ def load_uefi(path, tool, work, firmware):
             continue
         fd = data[start:start + firmware.FD_SIZE]
         try:
-            info = firmware.inspect_fd(fd)
-            if info['bds_drivers'] != 1:
-                continue
+            if passthrough:
+                validate_passthrough_fd(fd)
+            else:
+                info = firmware.inspect_fd(fd)
+                if info['bds_drivers'] != 1:
+                    continue
         except (ValueError, struct.error):
             continue
         candidates.append((start, fd))

@@ -9,9 +9,7 @@
 #define NABU_ACTION_LINUX   3  /* 原版 rEFInd 处理选中的 Linux EFI 条目 */
 #define NABU_ACTION_ANDROID 2  /* 写标记 + 热重启：内核分流代码回到 Android */
 
-/* 由 Visor 主流程在 Android/BDS 动作被选中时写入；
- * 固件卷内驱动（src/menu.zig）在 nabu_visor_menu() 返回后读取并执行。 */
-extern int nabu_exit_action;
+/* ESP 分支仅处理 linux 动作；旧配置 android/bds 不再截获普通 EFI 加载。 */
 
 EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs, EFI_HANDLE image);
 void nabu_linux_table_end(void);

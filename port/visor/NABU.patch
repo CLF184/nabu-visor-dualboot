@@ -17,7 +17,7 @@ index 9647da0..06e4f86 100644
 
      CHAR16 *buf = read_text_file(CONFIG_FILE);
      if (!buf) {
-+#ifdef NABU_EMBEDDED
++#if defined(NABU_EMBEDDED) && !defined(NABU_ESP_APPLICATION)
 +        /* nabu：读不到 ESP 配置时给出内置条目，避免退化为自动发现
 +         * （自动发现的条目在安全启动下无法链式加载）。 */
 +        efi_log(L"config: boot.conf not found - using built-in nabu entries");
@@ -139,7 +139,7 @@ diff --git a/src/core/main.c b/src/core/main.c
       * usual close in gui_shutdown() stays the normal path. */
      cap_session_finish();
 
-+#ifdef NABU_EMBEDDED
++#if defined(NABU_EMBEDDED) && !defined(NABU_ESP_APPLICATION)
 +    /* nabu 动作条目：不由 Visor 加载任何镜像，记录动作后干净返回，
 +     * 由固件卷内的 Nabu 驱动接管：
 +     *   bds     -> 调用固件原始 BDS 入口（Windows 走原生启动流程）

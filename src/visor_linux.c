@@ -111,6 +111,11 @@ static void EFIAPI end_dxe_notify(EFI_EVENT event, void *context) {
 }
 
 static EFI_STATUS finish_dxe(EFI_SYSTEM_TABLE *st) {
+#ifdef NABU_ESP_APPLICATION
+    /* This application was loaded by BDS after EndOfDxe. Do not signal it twice. */
+    (void)st;
+    return EFI_SUCCESS;
+#else
     if (!st || !st->BootServices) return EFI_INVALID_PARAMETER;
     EFI_GUID group = {0x02ce967a, 0xdd7e, 0x4ffc,
         {0x9e, 0xe7, 0x81, 0x0c, 0xf0, 0x47, 0x08, 0x80}};
@@ -122,6 +127,7 @@ static EFI_STATUS finish_dxe(EFI_SYSTEM_TABLE *st) {
     status = bs->SignalEvent(event);
     EFI_STATUS closed = bs->CloseEvent(event);
     return EFI_ERROR(status) ? status : closed;
+#endif
 }
 
 EFI_STATUS nabu_boot_linux(boot_entry_t *entry, EFI_SYSTEM_TABLE *st) {

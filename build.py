@@ -13,7 +13,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--project',type=Path,default=Path(__file__).resolve().parent,help=argparse.SUPPRESS)
     ap.add_argument('--boot',type=Path,help='原始 Android boot.img 路径；省略则用 tools/official/stock-boot.img')
-    ap.add_argument('--fd',type=Path,help='nabu UEFI .fd 或 .img；省略则用 tools/official/nabu-uefi.fd')
+    ap.add_argument('--fd',type=Path,required=True,help='必须指定允许未签名 EFI 的原始 nabu NoSB .fd 或 .img；FD 原样使用')
     ap.add_argument('--recovery',type=Path,help='可选 Recovery 镜像；省略则保留原 boot 的 ramdisk，指定时保留 Android 内核')
     root_apk=ap.add_mutually_exclusive_group()
     root_apk.add_argument('--magisk-apk',type=Path,help='可选 Magisk APK；root APK 均省略时不执行 root 修补')

@@ -46,24 +46,6 @@ def branch(target, pc):
         raise ValueError('AArch64 branch out of range')
     return struct.pack('<I', 0x14000000 | ((delta // 4) & 0x3ffffff))
 
-def inventory(fp, fd):
-    modules = {}
-    def sections(data):
-        for _, kind, hs, payload in fp.iter_sections(data):
-            if kind == 0x17:
-                volume(payload)
-            elif kind == 2 and payload[:16] == fp.LZMA_GUID:
-                offset = struct.unpack_from('<H', payload, 16)[0] - hs
-                sections(fp.lzma_unpack(payload[offset:]))
-    def volume(data):
-        for _, f in fp.parse_fv(data)[3]:
-            if f[18] in (0xf0, 1, 2):
-                continue
-            modules[f[:16]] = f
-            sections(f[24:])
-    volume(fd)
-    return modules
-
 def helper_text(obj, origin):
     """Resolve only the two external B instructions in the upstream loops."""
     data = Path(obj).read_bytes()
@@ -102,13 +84,14 @@ def main():
     ap.add_argument('--project', type=Path, default=Path(__file__).resolve().parent)
     ap.add_argument('--port', type=Path, default=Path(__file__).resolve().parent/'port/renegade')
     ap.add_argument('--boot', type=Path)
-    ap.add_argument('--fd', type=Path)
+    ap.add_argument('--fd', type=Path, required=True)
     ap.add_argument('--recovery', type=Path)
     root_apk = ap.add_mutually_exclusive_group()
     root_apk.add_argument('--magisk-apk', type=Path)
     root_apk.add_argument('--ksu-apk', type=Path)
     ap.add_argument('--ksu-kmi')
-    ap.add_argument('--recovery-port', type=Path, help='Optional standard BCB Recovery button adapter')
+    ap.add_argument('--recovery-port', type=Path, default=Path(__file__).resolve().parent/'port/recovery',
+                    help='Standard BCB Recovery adapter')
     ap.add_argument('--output-prefix', default='nabu-visor')
     ap.add_argument('--out-dir', required=True, type=Path)
     args = ap.parse_args()
@@ -116,7 +99,7 @@ def main():
         ap.error('--ksu-kmi requires --ksu-apk')
     root, port, out = args.project.resolve(), args.port.resolve(), args.out_dir.resolve()
     stock = (args.boot or root/'tools/official/stock-boot.img').resolve()
-    base_fd = (args.fd or root/'tools/official/nabu-uefi.fd').resolve()
+    base_fd = args.fd.resolve()
     baseline = root/'dist/nabu-visor-boot.img'
     old_release_sha = sha(baseline.read_bytes()) if baseline.exists() else None
     source_paths = {
@@ -145,7 +128,8 @@ def main():
             raise SystemExit('Vendored upstream source changed: '+file)
         sources[file] = {'git_blob': actual, 'sha256': sha(data), 'worktree_sha256': sha(worktree_data)}
     global _build_workspace
-    _build_workspace = tempfile.TemporaryDirectory(prefix='nabu-visor-build-', ignore_cleanup_errors=True)
+    (root/'build').mkdir(exist_ok=True)
+    _build_workspace = tempfile.TemporaryDirectory(prefix='esp-build-', dir=root/'build', ignore_cleanup_errors=True)
     work = Path(_build_workspace.name)
     output_dir = out
     out = work/'outputs'
@@ -163,7 +147,7 @@ def main():
     fp = load(root/'fd_patch.py', 'fd_patch_candidate')
     bp = load(root/'patch_boot.py', 'boot_patch_candidate')
     magisk = root/'tools/official/magiskboot.exe'
-    raw_fd, fd_input_record = load_uefi(base_fd, magisk, work, fp)
+    raw_fd, fd_input_record = load_uefi(base_fd, magisk, work, fp, passthrough=True)
     print('[prepare] UEFI input verified; prepare optional Recovery/root inputs', flush=True)
     apk = args.magisk_apk or args.ksu_apk
     prepared_stock, preparation = prepare_boot(
@@ -231,10 +215,10 @@ def main():
               '-I'+str(port/'compat'), '-I'+str(root/'third_party/gnu-efi/inc'),
               '-I'+str(root/'third_party/gnu-efi/inc/aarch64'), '-Os']
     reset_sources = [source_paths['Reboot2PayloadApp.c'], port/'bridge.c']
-    print('[1/4] Compile unchanged Renegade app + existing Visor menu', flush=True)
-    driver = work/'NabuBootMenu.efi'
+    print('[1/4] Compile standalone Visor, Android and Recovery EFI applications', flush=True)
+    menu_app = work/'NabuVisorMenu.efi'
     run(zig, 'build-exe', root/'src/menu.zig', '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
-        '-fentry=EfiMain', '--subsystem', 'efi_boot_service_driver', '-femit-bin='+str(driver),
+        '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(menu_app),
         '-cflags', *flags, '-I'+str(port/'compat'), '--',
         *menu_sources, *reset_sources, *recovery_sources)
     app = work/'NabuAndroid.efi'
@@ -242,26 +226,18 @@ def main():
         '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(app),
         '-cflags', *common, '--', *reset_sources)
     shutil.copy2(app, esp/'NabuAndroid.efi')
-    slot_builder = load(root/'boot_slot_build.py', 'boot_slot_build_candidate')
-    slot_driver, slot_record = slot_builder.build(root, work, run, zig)
-    print('[2/4] Keep original firmware modules; add menu and upstream BootSlotDxe', flush=True)
-    before = inventory(fp, raw_fd)
-    existing_slot = fp.inspect_fd(raw_fd)['boot_slot_drivers']
-    if existing_slot > 1:
-        raise ValueError('Input FD contains multiple BootSlotDxe modules')
-    fd, fd_info = fp.patch_fd(raw_fd, driver.read_bytes(), None if existing_slot else slot_driver.read_bytes())
-    after = inventory(fp, fd)
-    expected_added = {fp.DRIVER_GUID} - set(before)
-    if not existing_slot:
-        expected_added.add(fp.BOOT_SLOT_GUID)
-    if set(after)-set(before) != expected_added or fd_info['boot_slot_drivers'] != 1:
-        raise ValueError('Unexpected additional firmware module')
-    slot_record['embedded_origin'] = 'input_fd' if existing_slot else 'pinned_upstream_build'
-    slot_record['embedded_ffs_sha256'] = sha(after[fp.BOOT_SLOT_GUID])
-    # Containers may be rebuilt; all other inventoried firmware files remain identical.
-    for guid, f in before.items():
-        if f[18] != 0x0b and guid != fp.DRIVER_GUID and after.get(guid) != f:
-            raise ValueError('Original executable firmware module changed')
+    recovery_app = work/'NabuRecovery.efi'
+    efi_sources = [root/p for p in vb.sources() if p.startswith('third_party/gnu-efi/')]
+    run(zig, 'build-exe', root/'src/recovery_app.zig', '-target', 'aarch64-uefi-msvc', '-O', 'ReleaseSmall',
+        '-fentry=EfiMain', '--subsystem', 'efi_application', '-femit-bin='+str(recovery_app),
+        '-cflags', *common, '--', root/'src/visor_efi_support.c', *efi_sources,
+        *reset_sources, *recovery_sources)
+    shutil.copy2(recovery_app, esp/'NabuRecovery.efi')
+    fallback = esp_tree/'EFI/BOOT/bootaa64.efi'
+    fallback.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(menu_app, fallback)
+    print('[2/4] Keep the entire input FD unchanged; do not inject DXE drivers', flush=True)
+    fd = raw_fd
     fd_path = out/(args.output_prefix+'.fd')
     fd_path.write_bytes(fd)
     print('[3/4] Pair upstream marker loops with Nabu kernel/FD continuation', flush=True)
@@ -324,12 +300,10 @@ def main():
         raise ValueError('Repacked kernel differs')
     if (verify/'ramdisk.cpio').read_bytes() != (boot_dir/'ramdisk.cpio').read_bytes():
         raise ValueError('Android ramdisk changed')
-    print('[4/4] Package existing ESP configuration/assets + paired Android EFI', flush=True)
-    shutil.copy2(driver, out/driver.name)
+    print('[4/4] Package ESP menu, configuration/assets and system EFI applications', flush=True)
+    shutil.copy2(menu_app, out/menu_app.name)
     shutil.copy2(app, out/app.name)
-    shutil.copy2(slot_driver, out/slot_driver.name)
-    for name in ('LICENSE.txt', 'NOTICE.txt'):
-        shutil.copy2(root/'port/boot-slot'/name, out/('BootSlotDxe-'+name))
+    shutil.copy2(recovery_app, out/recovery_app.name)
     archive = out/(args.output_prefix+'-esp.zip')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         for file in sorted(esp_tree.rglob('*')):
@@ -337,6 +311,7 @@ def main():
                 z.write(file, file.relative_to(esp_tree).as_posix())
     manifest = {
         'device': 'xiaomi-nabu', 'status': 'CANDIDATE_NOT_HARDWARE_TESTED', 'hardware_tested': False,
+        'architecture': 'esp-application',
         'upstream': {'repo': 'https://github.com/edk2-porting/edk2-msm', 'commit': COMMIT, 'sources': sources},
         'input_boot': {'path': str(stock), 'sha256': sha(stock.read_bytes())},
         'input_fd': fd_input_record,
@@ -345,12 +320,13 @@ def main():
         'output_fd': {'file': fd_path.name, 'sha256': sha(fd)},
         'esp_package': {'file': archive.name, 'sha256': sha(archive.read_bytes())},
         'android_protocol': {'address': '0x17FE00000', 'value_u16': '0x5241', 'count': 128,
-                             'cache': 'write-back and invalidate of 256 bytes', 'reset': 'existing FD EfiResetWarm',
+                             'cache': 'write-back and invalidate of 256 bytes', 'reset': 'PSCI SYSTEM_RESET 0x84000009 via private Renegade runtime-services copy',
                              'reader': 'scan 128 halfwords; any match clears all 256 bytes then branches to Android'},
         'kernel': {'original_size': len(original), 'fd_offset': fd_offset,
                    'padding_size': fd_offset - len(original), 'helper_offset': origin,
                    'helper_size': len(helper), 'android_entry': hex(android_entry), 'sha256': sha(result_kernel)},
         'verification': {'original_executable_firmware_modules_unchanged': True,
+                         'entire_fd_unchanged': fd == raw_fd,
                          'original_generic_psci_reset_retained': True,
                          'original_android_payload_unchanged': not bool(args.recovery or apk),
                          'ramdisk_unchanged': not bool(args.recovery or apk),
@@ -370,8 +346,8 @@ def main():
             'fields_changed': [[0, 32], [64, 832]],
             'other_bytes': 'preserved, including 4 KiB block tail',
             'before_reset': 'write, flush, read back and compare',
-            'menu_bypass': 'call the unchanged nabu_renegade_android bridge: 128 x 0x5241 at 0x17FE00000, cache clean, warm reset',
-            'reset': 'existing FD EfiResetWarm',
+            'menu_bypass': 'original Renegade 128-marker writer, cache clean, PSCI reset through private runtime-services copy',
+            'reset': 'PSCI SYSTEM_RESET 0x84000009',
             'failure': 'restore original request and show error; no reboot on write failure',
             'target': 'Recovery ramdisk included from --recovery' if args.recovery else 'Recovery already installed on tablet; no Recovery image replacement',
         }
@@ -399,25 +375,30 @@ def main():
         manifest['notes'] = [
             'Newly generated image; requires hardware verification even though the released implementation was tested.',
             'Android uses the same paired Renegade markers previously verified by the user.',
-            'Windows BDS, Visor UI/config/assets, keys and 5-second idle behavior retained.',
-            'The third button writes the Recovery BCB, then reuses the existing Renegade marker/warm-reset bridge to bypass Visor once.',
+            'Visor is an ESP EFI application loaded by the original BDS; Windows uses the ordinary Visor EFI loader.',
+            'The third button and NabuRecovery.efi write the Recovery BCB, then reuse the paired Renegade marker/PSCI reset bridge.',
             'Native Recovery boot context from the original FDT bypasses Visor without an additional reboot, including the power/volume-up path. The previous build was confirmed for keys; this generated image still requires verification.',
             'Recovery ramdisk is included from the selected image.' if args.recovery else 'No Recovery ramdisk was supplied; the installed Recovery is used.',
-            'No old Qualcomm reset driver, direct Linux loader or extra SimpleInit menu.',
+            'Entire input FD is preserved: no menu/BDS hook, no injected BootSlotDxe and no reset-driver replacement.',
+            'Requires firmware that permits the unsigned ESP applications (NoSB); this build does not disable Secure Boot or change certificates.',
+            'PSCI marker retention and all system handoffs require testing on the selected firmware.',
         ]
     manifest['linux_protocol'] = {
         'action': 'nabu_action=linux', 'loader': r'\EFI\visor\refind\bootaa64.efi',
         'config': r'\EFI\visor\refind\nabu-selected.conf',
         'adapter_sha256': sha((root/'src/visor_linux.c').read_bytes()),
-        'stage': 'Linux-only EndOfDxe notification before original LoadImage',
+        'stage': 'Original BDS has already initialized the boot environment; no repeated EndOfDxe notification',
         'trace': r'\EFI\visor\refind\nabu-handoff.log',
         'trace_enabled': False, 'refind_log_level': 0, 'visor_file_log_enabled': False,
         'trace_sha256': sha((root/'src/visor_linux_trace.c').read_bytes()),
-        'system_table': 'fill missing Project Silicium vendor/revision, recalculate CRC; restore on return',
+        'system_table': 'use original BDS metadata; reject missing vendor without inventing firmware identity',
         'system_table_sha256': sha((root/'src/visor_linux_system.c').read_bytes()),
         'secure_boot_policy_changed': False, 'hardware_tested': False,
     }
-    manifest['boot_slot_protocol'] = slot_record
+    manifest['boot_slot_protocol'] = {'injected': False, 'behavior': 'unchanged input firmware only; no additional slot maintenance'}
+    manifest['menu_application'] = {'path': r'\EFI\BOOT\bootaa64.efi', 'sha256': sha(menu_app.read_bytes()),
+                                    'recovery_path': r'\EFI\visor\NabuRecovery.efi',
+                                    'windows': 'ordinary LoadImage/StartImage of the configured bootmgfw.efi'}
     refind_binary = esp/'refind/bootaa64.efi'
     if refind_binary.is_file():
         manifest['linux_protocol']['refind_sha256'] = sha(refind_binary.read_bytes())
@@ -425,8 +406,7 @@ def main():
     if visor_record.exists():
         manifest['visor_upstream'] = json.loads(visor_record.read_text(encoding='utf-8'))
     (out/'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
-    checksum_files = [image_path, fd_path, archive, driver, app, out/slot_driver.name,
-                      out/'BootSlotDxe-LICENSE.txt', out/'BootSlotDxe-NOTICE.txt',
+    checksum_files = [image_path, fd_path, archive, menu_app, app, recovery_app,
                       out/'RenegadeMarkerLoops.bin', out/'manifest.json']
     (out/'SHA256SUMS.txt').write_text(''.join(sha(p.read_bytes())+'  '+p.name+'\n' for p in checksum_files), encoding='ascii')
     if old_release_sha is not None and baseline.resolve() != image_path.resolve() and sha(baseline.read_bytes()) != old_release_sha:
@@ -434,9 +414,7 @@ def main():
     replacements = [(file, output_dir/file.name) for file in out.iterdir() if file.is_file()]
     for file in sorted(esp_tree.rglob('*')):
         if file.is_file():
-            target = root/'esp'/file.relative_to(esp_tree)
-            if not target.is_file() or sha(file.read_bytes()) != sha(target.read_bytes()):
-                replacements.append((file, target))
+            replacements.append((file, output_dir/'esp'/file.relative_to(esp_tree)))
     inputs = {stock, base_fd, *optional_inputs}
     if any(target.resolve() in inputs for _, target in replacements):
         raise ValueError('Build outputs must not overwrite the input boot or FD')

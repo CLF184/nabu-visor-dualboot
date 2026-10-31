@@ -18,6 +18,10 @@ EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs, EFI_HANDLE image) {
     EFI_SYSTEM_TABLE *table = loaded->SystemTable;
     nabu_linux_trace("SystemTable.vendor.missing", table->FirmwareVendor ? 0 : 1);
     if (table->FirmwareVendor) return EFI_SUCCESS;
+#ifdef NABU_ESP_APPLICATION
+    /* BDS owns this metadata. An unrelated firmware must never be renamed. */
+    return EFI_UNSUPPORTED;
+#else
     if (changed_table || table->Hdr.HeaderSize != sizeof(*table))
         return EFI_UNSUPPORTED;
     const CHAR16 vendor[] = L"Project Silicium";
@@ -39,6 +43,7 @@ EFI_STATUS nabu_linux_table_begin(EFI_BOOT_SERVICES *bs, EFI_HANDLE image) {
     changed_table = table; saved_vendor = previous; saved_revision = revision;
     new_vendor = copy; table_bs = bs;
     return EFI_SUCCESS;
+#endif
 }
 
 void nabu_linux_table_end(void) {

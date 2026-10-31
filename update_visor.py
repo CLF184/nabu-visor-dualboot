@@ -18,7 +18,7 @@ import zipfile
 sys.dont_write_bytecode = True
 REPO = 'https://github.com/IO-ZetZor/Visor-BootManager.git'
 OUTPUTS = ('nabu-visor-boot.img', 'nabu-visor.fd', 'nabu-visor-esp.zip',
-           'NabuBootMenu.efi', 'NabuAndroid.efi', 'RenegadeMarkerLoops.bin',
+           'NabuVisorMenu.efi', 'NabuAndroid.efi', 'NabuRecovery.efi', 'RenegadeMarkerLoops.bin',
            'manifest.json', 'SHA256SUMS.txt', 'README.md')
 STATE = '.visor-update'
 SOURCE_RECORD = 'port/visor-upstream.json'
@@ -267,9 +267,8 @@ def update(args):
             print('[3/4] 构建完整 ARM64 菜单、boot 和配置包', flush=True)
             run(sys.executable, '-B', '-X', 'utf8', project/'build.py', '--boot',
                 (args.boot or root/'tools/official/stock-boot.img').resolve(), '--fd',
-                (args.fd or root/'tools/official/nabu-uefi.fd').resolve(), '--out-dir', outputs, cwd=project)
+                args.fd.resolve(), '--out-dir', outputs, cwd=project)
             verify_build(outputs)
-            shutil.copy2(outputs/'NabuAndroid.efi', project/'esp/EFI/visor/NabuAndroid.efi')
             (outputs/'README.md').write_text(
                 '# 更新后生成的镜像\n\n上游 commit：`'+commit+'`。构建校验已通过，尚未真机验证。\n'
                 'boot 镜像需手动刷入，ESP 配置包需手动复制到平板；脚本不操作设备。\n', encoding='utf-8')
@@ -281,6 +280,8 @@ def update(args):
             replacements += [(root/'build'/name, project/'build'/name)
                              for name in ('visor_features.h', 'visor_manifest.c')]
             replacements += [(out/name, outputs/name) for name in OUTPUTS]
+            replacements += [(out/'esp'/p.relative_to(outputs/'esp'), p)
+                             for p in sorted((outputs/'esp').rglob('*')) if p.is_file()]
             def checkout_new():
                 if git('status', '--porcelain', cwd=module, capture=True) or tree_hash(module) != record['tree_sha256']:
                     raise RuntimeError('更新期间 Visor 子模块被修改，停止发布。')
@@ -301,7 +302,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--ref', default='main', help='上游分支、tag 或完整 commit；默认 main 最新提交')
     ap.add_argument('--boot', type=Path, help='原始 Android boot.img；默认工程自带输入')
-    ap.add_argument('--fd', type=Path, help='原始 nabu FD；默认工程自带输入')
+    ap.add_argument('--fd', type=Path, required=True, help='原始 nabu NoSB .fd 或 .img；FD 原样使用')
     ap.add_argument('--out-dir', type=Path, help='工程内的输出目录；默认 dist，同名成品覆盖')
     ap.add_argument('--check-only', action='store_true', help='下载、打补丁和编译检查，不替换当前文件')
     ap.add_argument('--source', type=Path, help='用本地原始上游源码代替下载；无 Git 记录时需 --ref 完整 commit')

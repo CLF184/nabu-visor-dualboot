@@ -16,8 +16,6 @@ static SIMPLE_INPUT_INTERFACE local_input;
 static UINT64 last_poll;
 static int first_poll;
 static gui_state_t *active_state;
-/* Visor 主流程选择 nabu_action 条目时写入；驱动读取后执行对应动作。 */
-int nabu_exit_action = NABU_ACTION_NONE;
 #ifndef VISOR_HOST_TEST
 static UINT64 frequency;
 void arch_clock_init(void) {
@@ -97,12 +95,13 @@ static EFI_STATUS EFIAPI reset_input(SIMPLE_INPUT_INTERFACE *self,BOOLEAN verify
     (void)self;(void)verify;return EFI_SUCCESS;
 }
 extern EFI_STATUS efi_main(EFI_HANDLE handle,EFI_SYSTEM_TABLE *table);
-void nabu_visor_menu(EFI_HANDLE handle,EFI_SYSTEM_TABLE *table) {
+EFI_STATUS nabu_visor_menu(EFI_HANDLE handle,EFI_SYSTEM_TABLE *table) {
     local_table=*table;ZeroMem(&local_input,sizeof(local_input));
     if(table->ConIn)local_input=*table->ConIn;
     local_input.ReadKeyStroke=read_input;local_input.Reset=reset_input;
     local_table.ConIn=&local_input;
     first_poll=1;last_poll=0;
-    efi_main(handle,&local_table);
+    EFI_STATUS status=efi_main(handle,&local_table);
     efi_log_close();active_state=NULL;nabu_font_release();nabu_landscape_end();
+    return status;
 }

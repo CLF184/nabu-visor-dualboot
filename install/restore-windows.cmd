@@ -3,8 +3,7 @@ setlocal EnableExtensions
 chcp 65001 >nul
 title nabu_visor_dualboot - remove ESP config
 
-rem 路线 2：只删除 ESP 上的 \EFI\visor\ 配置与素材目录。
-rem 注意：要彻底回滚还需要用 fastboot 刷回原来的 boot.img（见 README）。
+rem 先恢复原回退 EFI，再删除 Visor 资源；另需恢复原 boot 镜像。
 
 net session >nul 2>&1
 if errorlevel 1 (
@@ -15,7 +14,7 @@ if errorlevel 1 (
 echo [*] Mounting EFI System Partition...
 set "ESPL="
 for %%L in (S T U V W) do (
-  if not defined ESPL (
+  if not defined ESPL if not exist "%%L:\" (
     mountvol %%L: /s >nul 2>&1 && (
       if exist "%%L:\EFI" set "ESPL=%%L:"
     )
@@ -26,6 +25,17 @@ if not defined ESPL (
   pause & exit /b 1
 )
 echo [*] ESP at %ESPL%
+if not exist "%ESPL%\EFI\BOOT\bootaa64.efi.before-visor" (
+  echo [!] Original fallback EFI backup missing. Restore it manually first.
+  mountvol %ESPL% /d >nul 2>&1
+  pause & exit /b 1
+)
+copy /b /y "%ESPL%\EFI\BOOT\bootaa64.efi.before-visor" "%ESPL%\EFI\BOOT\bootaa64.efi" >nul
+if errorlevel 1 (
+  echo [!] Failed to restore the fallback EFI. Keeping Visor resources.
+  mountvol %ESPL% /d >nul 2>&1
+  pause & exit /b 1
+)
 
 if exist "%ESPL%\EFI\visor" (
   echo [*] Removing %ESPL%\EFI\visor ...
@@ -36,7 +46,7 @@ if exist "%ESPL%\EFI\visor" (
 
 mountvol %ESPL% /d >nul 2>&1
 echo.
-echo [OK] ESP config removed.
+echo [OK] Original fallback EFI restored; Visor resources removed.
 echo      To go back to the original single-boot behaviour, also flash your
 echo      previous boot.img:  fastboot flash boot ^<old image^>
 pause

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * Nabu Recovery: AOSP BCB request, then the existing firmware warm reset.
+ * Nabu Recovery: AOSP BCB request, then paired markers and PSCI reset.
  * Field layout and update semantics:
  * https://android.googlesource.com/platform/bootable/recovery/+/refs/heads/main/bootloader_message/bootloader_message.cpp
  * Only command[32] and recovery[768] change; status/stage/vendor data survive.
@@ -23,7 +23,7 @@ static EFI_GUID partition_guid = {0x8cf2f62c,0xbc9b,0x4821,{0x80,0x8d,0xec,0x9e,
 static EFI_GUID block_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
 static CHAR16 *last_error = L"Recovery request failed";
 CHAR16 *nabu_recovery_error(void) { return last_error; }
-/* Reuse the exact upstream Android marker writer and warm reset bridge. */
+/* Reuse the upstream marker writer and this branch's private PSCI bridge. */
 extern EFI_STATUS nabu_renegade_android(EFI_HANDLE, EFI_SYSTEM_TABLE *);
 extern EFI_HANDLE LibImageHandle;
 

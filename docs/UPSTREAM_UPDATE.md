@@ -1,9 +1,9 @@
 # 一键更新 Visor
 
-双击工程根目录的 **`update_visor.cmd`**。也可以在 PowerShell 中进入工程后执行：
+ESP 应用分支在工程目录执行，显式指定允许未签名 EFI 的原始 NoSB 固件：
 
 ```powershell
-py update_visor.py
+py update_visor.py --fd "E:\path\nabu-NoSB.img"
 ```
 
 需要 Python 3、Git for Windows 和能够访问 GitHub 的网络。Zig、补丁工具与原始镜像按 README 准备。
@@ -12,7 +12,7 @@ py update_visor.py
 
 1. 在独立临时目录下载完整上游源码，记录准确 commit。
 2. 检查并应用 `port/visor/NABU.patch`，重新生成完整 ARM64 功能清单。
-3. 沿用现有 nabu、Renegade 和 Recovery 适配，编译 FD、boot 镜像和 ESP 包，执行现有构建校验。
+3. 沿用 nabu、Renegade 标记和 PSCI 桥接、Recovery 适配，编译三个独立 EFI 应用、boot 和 ESP 包；输入 FD 原样保留，不编译或注入 DXE。
 4. 将被替换的文件备份到 `.visor-update/backup.zip`，然后将 Visor 子模块检出到新 commit，更新功能清单、ESP 资源、来源记录和 `dist/` 中的同名成品。GNU-EFI 与 Renegade 的子模块提交保持固定。
 
 **脚本不刷机、不挂载或修改平板 ESP。** 更新后的镜像需要手动刷入、复制配置包并确认 Android、Windows、Recovery。构建通过不等于真机已经验证；新 manifest 会明确记录未真机验证状态。
@@ -22,28 +22,28 @@ py update_visor.py
 仅下载、打补丁和编译检查，保留当前源码、配置与成品：
 
 ```powershell
-py update_visor.py --check-only
+py update_visor.py --fd "E:\path\nabu-NoSB.img" --check-only
 ```
 
 更新到指定 tag、分支或完整 commit：
 
 ```powershell
-py update_visor.py --ref 71a05b5945e37903cfeeaf69c76220fdf5861ac9
+py update_visor.py --fd "E:\path\nabu-NoSB.img" --ref 71a05b5945e37903cfeeaf69c76220fdf5861ac9
 ```
 
 同时更换原始 boot、FD 或输出目录：
 
 ```powershell
-py update_visor.py --boot "E:\你的文件夹\boot.img" --fd "E:\你的文件夹\nabu.fd" --out-dir ".\dist"
+py update_visor.py --boot "E:\你的文件夹\boot.img" --fd "E:\你的文件夹\nabu-NoSB.img" --out-dir ".\dist"
 ```
 
 输出目录允许已存在，同名生成文件覆盖，无关文件保留。更新脚本的输出目录须在工程内，并避开源码和依赖目录；普通 `build.py` 没有这项更新事务的路径限制。
-原始输入必须是未加本菜单补丁的 Android boot 与 nabu FD。省略时使用 `tools/official/` 中的默认输入，不自动猜测上次手动构建用了什么输入。
+原始输入必须是未加菜单补丁的 Android boot 与 nabu NoSB 固件。`--fd` 不能省略；`--boot` 省略时使用 `tools/official/stock-boot.img`，不自动猜测上次手动构建的输入。
 
 本地上游源码也可使用；它必须未打过 nabu 补丁。目录含 Git 记录时要求工作区干净；源码包无 Git 记录时要指定完整 commit：
 
 ```powershell
-py update_visor.py --source "E:\你的文件夹\Visor-BootManager" --ref 71a05b5945e37903cfeeaf69c76220fdf5861ac9
+py update_visor.py --fd "E:\path\nabu-NoSB.img" --source "E:\你的文件夹\Visor-BootManager" --ref 71a05b5945e37903cfeeaf69c76220fdf5861ac9
 ```
 
 ## 保留配置与处理失败
@@ -62,8 +62,8 @@ py update_visor.py --source "E:\你的文件夹\Visor-BootManager" --ref 71a05b5
 
 初始上游基线为 `71a05b5945e37903cfeeaf69c76220fdf5861ac9`。当前准确版本、补丁哈希和源码校验值以 `port/visor-upstream.json` 为准；新的镜像 manifest 也记录这些信息。
 
-`NABU.patch` 集中维护上游文件适配，包含 `nabu_action` 配置解析、Android/BDS 交接、菜单硬件接口和 ABI 适配。`port/recovery/overlay.py` 继续处理 Recovery 按钮标签与请求错误显示；`port/renegade/` 提供 ABI 桥接与兼容头文件，标记程序和接收循环读取 Renegade 子模块源码。
+`NABU.patch` 集中维护菜单硬件接口、ABI、Linux 动作及其余上游适配。ESP 分支编译宏禁用 Android/BDS 截获和固件内置默认条目：普通 EFI 条目由上游加载，配置缺失沿用上游自动发现。新增动作优先编写独立 EFI，不为普通应用新增菜单动作键。`port/recovery/overlay.py` 处理第三按钮与错误显示，独立 Recovery 条目使用 `src/recovery_app.zig`。Renegade 写入/接收循环仍来自固定子模块，仅私有运行时服务桥接改为 PSCI 复位。
 
-上游项目：[IO-ZetZor/Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)。上游 `visor update` 适用于其原版 ESP 安装方式，不更新本工程 FD 内的菜单。
+上游项目：[IO-ZetZor/Visor-BootManager](https://github.com/IO-ZetZor/Visor-BootManager)。不要用未经 nabu 适配的上游二进制覆盖本分支应用；应通过本脚本重新应用平台补丁和编译。仅更新菜单/主题时安装 ESP 文件即可，FD、内核或分流器变化时才需刷入新 boot。
 
 更新后主仓库会出现 Visor 子模块指针、来源记录和配置资源的变化。需要把新版本保存到 GitHub 时，检查后提交并推送这些变化；更新脚本不自动提交或推送。所有适配仍仅在临时副本应用。

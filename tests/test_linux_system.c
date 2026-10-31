@@ -1,4 +1,5 @@
 #define GNU_EFI_SETJMP_H
+#define NABU_ESP_APPLICATION 1
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -29,19 +30,13 @@ static EFI_STATUS EFIAPI crc(VOID *p,UINTN size,UINT32 *out) {
 int main(void) {
     EFI_BOOT_SERVICES bs={0};bs.HandleProtocol=protocol;bs.AllocatePool=alloc;bs.FreePool=release;bs.CalculateCrc32=crc;
     loaded.SystemTable=&table;table.Hdr.HeaderSize=sizeof(table);table.Hdr.CRC32=123;
-    for(fail=1;fail<=2;fail++) {
-        assert(EFI_ERROR(nabu_linux_table_begin(&bs,(void*)1)) && !pools);
-        assert(!table.FirmwareVendor && !table.FirmwareRevision && table.Hdr.CRC32==123);
-    }
-    fail=0;assert(nabu_linux_table_begin(&bs,(void*)1)==EFI_SUCCESS && pools==1);
-    assert(table.FirmwareVendor[0]=='P' && table.FirmwareRevision==0x10000);
-    table.NumberOfTableEntries=3;nabu_linux_table_end();
-    assert(!table.FirmwareVendor && !table.FirmwareRevision && !pools);
-    assert(table.NumberOfTableEntries==3 && table.Hdr.CRC32==103);
+    assert(nabu_linux_table_begin(&bs,(void*)1)==EFI_UNSUPPORTED);
+    assert(!pools && !crc_calls && !table.FirmwareVendor);
+    assert(!table.FirmwareRevision && table.Hdr.CRC32==123);
     table.FirmwareVendor=L"Existing firmware";table.FirmwareRevision=42;
     int before=crc_calls;assert(nabu_linux_table_begin(&bs,(void*)1)==EFI_SUCCESS);
     nabu_linux_table_end();assert(!pools && table.FirmwareRevision==42 && crc_calls==before);
     table.FirmwareVendor=NULL;table.Hdr.HeaderSize=0;
     assert(nabu_linux_table_begin(&bs,(void*)1)==EFI_UNSUPPORTED && !pools);
-    puts("Linux system table: runtime metadata allocation, CRC/rollback, existing fields preserved, child config changes retained");
+    puts("ESP Linux system table: original BDS metadata preserved, missing vendor rejected without writes");
 }
