@@ -1,5 +1,9 @@
 # nabu Visor 启动菜单
 
+> **这是保留 Windows Secure Boot 的 `secure-boot` 分支（原 `main`）。一般推荐使用默认的 [ESP 独立菜单方案](https://github.com/CLF184/nabu-visor-dualboot/tree/esp-application)。** 新默认方案保持 FD 原样、由固件加载 ESP 菜单，但需要 NoSB 固件，Windows 的 Secure Boot 保护也会关闭。
+>
+> 本分支把菜单驱动加入 FD 并挂接原 BDS，适用于经过验证的匹配固件组合。其他来源 FD 可能黑屏、卡启动画面或在重启交接时崩溃；编译成功不代表兼容。务必保留原 boot、ESP 备份和 Fastboot 回滚方式。保留 Secure Boot 的能力取决于输入 FD 的实现与实际配置，不会把 NoSB 固件变成支持 Secure Boot 的固件。
+
 小米平板 5（nabu）的 Visor 图形启动菜单。横屏显示，音量键选择，电源键确认。进入后 5 秒无操作自动启动 Android；有操作则取消本次倒计时，等待确认。
 
 沿用 Visor 的外部配置、主题资源和完整 ARM64 功能清单。菜单嵌入 UEFI FD，配置与素材放在平板 ESP 的 `\EFI\visor\`。Android 使用 Renegade 标记配对启动，Windows 继续原固件 BDS 流程，Recovery 启动平板已有的 Recovery。
@@ -11,7 +15,7 @@
 在 Windows PowerShell 中执行：
 
 ```powershell
-git clone https://github.com/CLF184/nabu-visor-dualboot.git
+git clone --branch secure-boot https://github.com/CLF184/nabu-visor-dualboot.git
 cd nabu-visor-dualboot
 git submodule update --init --depth 1
 py -m pip install --target tools/python ziglang==0.14.1
